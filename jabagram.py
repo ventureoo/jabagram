@@ -247,10 +247,11 @@ class XmppClient(metaclass=Singleton):
 
 
 class TelegramApiError(Exception):
-    def __init__(self, code, desc):
+    def __init__(self, code, desc, retry_after=None):
         super().__init__(f"Telegram API error occured ({code}): {desc}")
         self.code = code
         self.desc = desc
+        self.retry_after = retry_after
 
 
 class TelegramClient(metaclass=Singleton):
@@ -292,8 +293,10 @@ class TelegramClient(metaclass=Singleton):
                     resp = await request.json()
 
             if not resp.get("ok"):
+                params = resp.get("parameters")
+                retry = params.get("retry_after") if params else None
                 raise TelegramApiError(
-                    resp['error_code'], resp['description']
+                    resp['error_code'], resp['description'], retry
                 )
 
             return resp['result']
@@ -381,11 +384,15 @@ class TelegramClient(metaclass=Singleton):
 
                 params['offset'] = updates[len(updates) - 1]['update_id'] + 1
             except TelegramApiError as error:
-                self._logger.exception("Error while receiving updates")
-
                 # Wait when requests limit is exceeded
-                if error.code == 429:
-                    await asyncio.sleep(3)
+                retry_after = error.retry_after
+                if retry_after:
+                    self._logger.warning(
+                        f"Too many requests, sleeping on {retry_after}s..."
+                    )
+                    await asyncio.sleep(retry_after)
+                else:
+                    self._logger.exception("Error while receiving updates")
 
     def unbridge_chat(self, chat_id):
         del self._data.handlers[chat_id]
