@@ -385,7 +385,7 @@ class TelegramClient(metaclass=Singleton):
 
                 # Wait when requests limit is exceeded
                 if error.code == 429:
-                    asyncio.sleep(3)
+                    await asyncio.sleep(3)
 
     def unbridge_chat(self, chat_id):
         del self._data.handlers[chat_id]
