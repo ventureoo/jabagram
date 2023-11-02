@@ -1035,6 +1035,14 @@ def main():
         loop = asyncio.get_event_loop()
         loop.create_task(xmpp.run())
         loop.create_task(telegram.run())
+
+        def exception_handler(_, context):
+            exception = context.get("exception")
+
+            if exception:
+                logger.warning("Some unhandled error occured: %s", exception)
+
+        loop.set_exception_handler(exception_handler)
         loop.run_forever()
     except FileNotFoundError:
         logger.error(
