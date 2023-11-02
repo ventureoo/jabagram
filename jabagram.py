@@ -27,6 +27,7 @@ import argparse
 from json import dumps
 from datetime import datetime
 from collections import OrderedDict
+from aiohttp import ClientConnectionError
 from aioxmpp import PresenceManagedClient, JID
 from aioxmpp.muc import Room, Occupant
 from aioxmpp.muc.xso import History
@@ -393,6 +394,10 @@ class TelegramClient(metaclass=Singleton):
                     await asyncio.sleep(retry_after)
                 else:
                     self._logger.exception("Error while receiving updates")
+            except ClientConnectionError as error:
+                self._logger.error(
+                    "Connection failure while getting updates: %s", error
+                )
 
     def unbridge_chat(self, chat_id):
         del self._data.handlers[chat_id]
