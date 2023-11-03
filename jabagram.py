@@ -23,6 +23,7 @@ import configparser
 import logging
 import dbm
 import argparse
+import mimetypes
 
 from json import dumps
 from datetime import datetime
@@ -477,12 +478,24 @@ class TelegramChatHandler():
             url = self._telegram.get_file_url(file["file_path"])
 
             fname = attachment.get("file_name") or file_unique_id
-            mime = attachment.get("mime_type") or "image/jpeg"
+            mime = attachment.get("mime_type")
+
+            if message.get("photo"):
+                # Telegram compresses all photos to JPEG
+                # if they were not sent as a document
+                mime = "image/jpeg"
+
+            if not mime:
+                async with aiohttp.ClientSession() as session:
+                    async with session.head(url) as resp:
+                        mime = resp.content_type
 
             if message.get("voice"):
                 fname = f"Voice message from {sender}.ogg"
             elif message.get("video_note"):
                 fname = f"Video from {sender}.mp4"
+            else:
+                fname += mimetypes.guess_extension(mime)
 
             await self._xmpp.send_attachment(
                 sender=name,
