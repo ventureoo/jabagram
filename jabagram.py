@@ -495,7 +495,10 @@ class TelegramChatHandler():
             elif message.get("video_note"):
                 fname = f"Video from {sender}.mp4"
             else:
-                fname += mimetypes.guess_extension(mime)
+                extension = mimetypes.guess_extension(mime)
+
+                if extension:
+                    fname += extension
 
             await self._xmpp.send_attachment(
                 sender=name,
