@@ -818,6 +818,8 @@ class XmppRoomHandler():
             f"XmppRoomHandler ({str(room.jid.bare())})"
         )
         self._logger.info("New XmppRoomHandler created")
+        self._nick_lock = asyncio.Lock()
+        self._last_sender = None
 
     def on_exit(self, *, muc_leave_mode=None, muc_actor=None, muc_reason=None,
                 muc_status_codes=set(), **kwargs):
@@ -858,6 +860,7 @@ class XmppRoomHandler():
     def on_nick_changed(self, member, old_nick, new_nick, *,
                         muc_status_codes=None, **kwargs):
         if member == self._room.me:
+            self._last_sender = new_nick
             return
 
         self._loop.create_task(
@@ -983,14 +986,22 @@ class XmppRoomHandler():
                     yield chunk
 
     async def _set_nick(self, sender: str):
-        if self._room.me.nick == sender:
+        if self._last_sender == sender:
             return
 
-        try:
-            await self._room.set_nick(sender)
-        # BUG: Raises when changing a nickname containing an emoji
-        except ValueError as ex:
-            self._logger.exception("An invalid user name has been passed", ex)
+        async with self._nick_lock:
+            try:
+                await self._room.set_nick(sender)
+
+                # Wait at least 100ms for the bot to change
+                # its nickname before sending a message
+                while self._last_sender != sender:
+                    asyncio.sleep(0.1)
+            # BUG: Raises when changing a nickname containing an emoji
+            except ValueError as ex:
+                self._logger.exception(
+                    "An invalid user name has been passed", ex
+                )
 
     async def unbridge(self):
         msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
