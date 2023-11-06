@@ -150,8 +150,9 @@ class MessageMap():
 class XmppClient(metaclass=Singleton):
     def __init__(self, login: str, password: str, key: str):
         self._data = ChatManager()
+        self._jid = JID.fromstr(login)
         self._client = PresenceManagedClient(
-            JID.fromstr(login), aioxmpp.make_security_layer(password)
+            self._jid, aioxmpp.make_security_layer(password)
         )
         self._logger = logging.getLogger("XmppClient")
         self._muc = None
@@ -246,6 +247,10 @@ class XmppClient(metaclass=Singleton):
         )
 
         return slot
+
+    @property
+    def jid(self):
+        return self._jid
 
 
 class TelegramApiError(Exception):
@@ -491,9 +496,9 @@ class TelegramChatHandler():
                         mime = resp.content_type
 
             if message.get("voice"):
-                fname = f"Voice message from {sender}.ogg"
+                fname = f"Voice message from {name}.ogg"
             elif message.get("video_note"):
-                fname = f"Video from {sender}.mp4"
+                fname = f"Video from {name}.mp4"
             else:
                 extension = mimetypes.guess_extension(mime)
 
@@ -817,9 +822,9 @@ class XmppRoomHandler():
         self._logger = logging.getLogger(
             f"XmppRoomHandler ({str(room.jid.bare())})"
         )
-        self._logger.info("New XmppRoomHandler created")
         self._nick_lock = asyncio.Lock()
         self._last_sender = None
+        self._logger.info("New XmppRoomHandler created")
 
     def on_exit(self, *, muc_leave_mode=None, muc_actor=None, muc_reason=None,
                 muc_status_codes=set(), **kwargs):
@@ -845,10 +850,7 @@ class XmppRoomHandler():
                 )
 
     def on_muc_enter(self, member, **kwargs):
-        if self._room.me is None:
-            return
-
-        if member == self._room.me:
+        if member.direct_jid == self._xmpp.jid.bare():
             return
 
         nick = member.nick
@@ -859,7 +861,7 @@ class XmppRoomHandler():
 
     def on_nick_changed(self, member, old_nick, new_nick, *,
                         muc_status_codes=None, **kwargs):
-        if member == self._room.me:
+        if member.direct_jid == self._xmpp.jid.bare():
             self._last_sender = new_nick
             return
 
@@ -886,7 +888,7 @@ class XmppRoomHandler():
     def process_message(self, message: Message, member: Occupant, source,
                         **kwargs):
         # Not handling your own messages
-        if member == self._room.me:
+        if member.direct_jid == self._xmpp.jid.bare():
             return
 
         if message.xep0066_oob:
