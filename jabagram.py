@@ -998,7 +998,7 @@ class XmppRoomHandler():
                 # Wait at least 100ms for the bot to change
                 # its nickname before sending a message
                 while self._last_sender != sender:
-                    asyncio.sleep(0.1)
+                    await asyncio.sleep(0.1)
             # BUG: Raises when changing a nickname containing an emoji
             except ValueError as ex:
                 self._logger.exception(
