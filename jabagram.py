@@ -916,6 +916,7 @@ class XmppRoomHandler():
 
         self._logger.info(f"Recieved message from telegram: {telegram_id}")
         try:
+            await asyncio.sleep(0.1)
             await self._set_nick(sender)
 
             (base, tracker) = self._room.send_message_tracked(msg)
@@ -963,6 +964,7 @@ class XmppRoomHandler():
         msg.xep0066_oob.url = slot.get.url
 
         try:
+            await asyncio.sleep(0.1)
             await self._set_nick(sender)
             await self._room.send_message(msg)
         except Exception:
