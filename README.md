@@ -89,7 +89,9 @@ For example, in the Gajim client, this is done with the command:
 ``/invite <XMPP_JID> <SECRET_KEY>``
 6. Once the bot successfully joins an XMPP room, messages should be sent between your room and the chat room in Telegram.
 
-If you want to "unbridge" chats, just kick the bot from your Telegram chat or XMPP room. It will automatically remove the entry from the database.
+If you want to "unbridge" chats, just kick the bot from your Telegram chat or XMPP room. It will automatically remove the entry from the database. Note that losing the ``jabagram.db`` file will unbridge all chats and you will need to re-bridge them.
+
+To re-bridge chats follow the steps above.
 
 ### Limitations
 
@@ -114,6 +116,12 @@ Telegram has a proprietary format for animated stickers that probably can't be p
 #### Forwarding private messages
 
 Sorry, but at the moment I only want to support forwarding messages from group chats or MUCs. But this may be implemented in the future.
+
+#### Mobile XMPP clients don't show nicknames set by the bot in MUC
+
+Some mobile clients like Conversations and Blabber don't show nicknames in MUC for users you have in your contacts [1]. Please, after inviting a bot to XMPP, make sure you remove it from your contacts, otherwise it will not accept Telegram sender nicknames for you.
+
+[1] - https://github.com/iNPUTmice/Conversations/commit/ef1429c9a6983c101da41a277bd9353374dc89e7
 
 ## License
 
