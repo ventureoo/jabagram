@@ -823,6 +823,7 @@ class XmppRoomHandler():
             f"XmppRoomHandler ({str(room.jid.bare())})"
         )
         self._last_sender = None
+        self._nick_lock = asyncio.Lock()
         self._logger.info("New XmppRoomHandler created")
 
     def on_exit(self, *, muc_leave_mode=None, muc_actor=None, muc_reason=None,
@@ -862,6 +863,7 @@ class XmppRoomHandler():
                         muc_status_codes=None, **kwargs):
         if member.direct_jid == self._xmpp.jid.bare():
             self._last_sender = new_nick
+            self._nick_lock.release()
             return
 
         self._loop.create_task(
@@ -916,7 +918,6 @@ class XmppRoomHandler():
 
         self._logger.info(f"Recieved message from telegram: {telegram_id}")
         try:
-            await asyncio.sleep(0.1)
             await self._set_nick(sender)
 
             (base, tracker) = self._room.send_message_tracked(msg)
@@ -964,7 +965,6 @@ class XmppRoomHandler():
         msg.xep0066_oob.url = slot.get.url
 
         try:
-            await asyncio.sleep(0.1)
             await self._set_nick(sender)
             await self._room.send_message(msg)
         except Exception:
@@ -989,6 +989,11 @@ class XmppRoomHandler():
                     yield chunk
 
     async def _set_nick(self, sender: str):
+        if self._last_sender == sender:
+            return
+
+        await self._nick_lock.acquire()
+
         try:
             await self._room.set_nick(sender)
         # BUG: Raises when changing a nickname containing an emoji
@@ -996,6 +1001,7 @@ class XmppRoomHandler():
             self._logger.exception(
                 "An invalid user name has been passed", ex
             )
+            self._nick_lock.release()
 
     async def unbridge(self):
         msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
