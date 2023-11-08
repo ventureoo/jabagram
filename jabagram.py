@@ -24,6 +24,7 @@ import logging
 import dbm
 import argparse
 import mimetypes
+import demoji
 
 from json import dumps
 from datetime import datetime
@@ -992,9 +993,9 @@ class XmppRoomHandler():
                     yield chunk
 
     async def _set_nick(self, sender: str):
+        sender = demoji.replace(sender, "")
         try:
             await self._room.set_nick(sender)
-        # BUG: Raises when changing a nickname containing an emoji
         except ValueError as ex:
             self._logger.exception(
                 "An invalid user name has been passed", ex
