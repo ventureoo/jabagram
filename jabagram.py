@@ -711,8 +711,7 @@ class TelegramChatHandler():
 
         if telegram_id is None:
             self._logger.debug(
-                f"Message with {stanza_id} not found in the message map",
-                "It is not possible to edit a message"
+                f"Message with {stanza_id} not found in the message map"
             )
             return
 
@@ -895,6 +894,10 @@ class XmppRoomHandler():
     def process_message(self, message: Message, member: Occupant, source,
                         **kwargs):
         self._logger.debug("The message callback has been triggered")
+
+        if message.from_:
+            if message.from_.bare() == self._xmpp.jid.bare():
+                return
 
         # Not handling your own messages
         if member == self._room.me:
