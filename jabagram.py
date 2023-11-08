@@ -823,6 +823,7 @@ class XmppRoomHandler():
             f"XmppRoomHandler ({str(room.jid.bare())})"
         )
         self._last_sender = None
+        self._message_lock = asyncio.Lock()
         self._logger.info("New XmppRoomHandler created")
 
     def on_exit(self, *, muc_leave_mode=None, muc_actor=None, muc_reason=None,
@@ -916,8 +917,12 @@ class XmppRoomHandler():
 
         self._logger.info(f"Recieved message from telegram: {telegram_id}")
         try:
-            await asyncio.sleep(0.1)
+            await self._message_lock.acquire()
+
             await self._set_nick(sender)
+
+            while self._last_sender != sender:
+                await asyncio.sleep(0.1)
 
             (base, tracker) = self._room.send_message_tracked(msg)
 
@@ -926,6 +931,7 @@ class XmppRoomHandler():
                     return
 
                 self._message_map.add(telegram_id, response.id_)
+                self._message_lock.release()
 
             tracker.on_state_changed.connect(state_callback)
         except Exception as ex:
@@ -963,12 +969,16 @@ class XmppRoomHandler():
         msg.xep0066_oob = OOBExtension()
         msg.xep0066_oob.url = slot.get.url
 
-        try:
-            await asyncio.sleep(0.1)
-            await self._set_nick(sender)
-            await self._room.send_message(msg)
-        except Exception:
-            self._logger.exception("Error while sending attachment")
+        async with self._message_lock:
+            try:
+                await self._set_nick(sender)
+
+                while self._last_sender != sender:
+                    await asyncio.sleep(0.1)
+
+                await self._room.send_message(msg)
+            except Exception:
+                self._logger.exception("Error while sending attachment")
 
     async def edit_message(self, stanza_id: str, text: str):
         msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
