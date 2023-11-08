@@ -895,12 +895,18 @@ class XmppRoomHandler():
                         **kwargs):
         self._logger.debug("The message callback has been triggered")
 
+        # 10 circles of hell to see if we're getting our own messages across
+        if member.nick.endswith("(Telegram)"):
+            self._logger.debug("Did we get a message from ourselves? Really?")
+            return
+
         if message.from_:
             if message.from_.bare() == self._xmpp.jid.bare():
+                self._logger.debug("Some strange things happens")
                 return
 
         # Not handling your own messages
-        if member == self._room.me:
+        if member.direct_jid.bare() == self._xmpp.jid.bare():
             self._logger.debug("Recieved your own message, return")
             return
 
