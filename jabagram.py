@@ -829,6 +829,7 @@ class XmppRoomHandler():
 
     def on_exit(self, *, muc_leave_mode=None, muc_actor=None, muc_reason=None,
                 muc_status_codes=set(), **kwargs):
+        self._logger.debug("The exit callback has been triggered")
         if muc_leave_mode in (LeaveMode.DISCONNECTED,
                               LeaveMode.SYSTEM_SHUTDOWN,
                               LeaveMode.NORMAL,
@@ -843,6 +844,7 @@ class XmppRoomHandler():
 
     def on_leave(self, member, *, muc_leave_mode=None, muc_actor=None,
                  muc_reason=None, **kwargs):
+        self._logger.debug("The leave callback has been triggered")
         nick = member.nick
         if muc_leave_mode == LeaveMode.NORMAL:
             if not nick.endswith("(Telegram)") and not BRIDGE_DEFAULT_NAME:
@@ -851,6 +853,7 @@ class XmppRoomHandler():
                 )
 
     def on_muc_enter(self, member, **kwargs):
+        self._logger.debug("The enter callback has been triggered")
         if member.direct_jid == self._xmpp.jid.bare():
             return
 
@@ -862,8 +865,10 @@ class XmppRoomHandler():
 
     def on_nick_changed(self, member, old_nick, new_nick, *,
                         muc_status_codes=None, **kwargs):
+        self._logger.debug("The nick callback has been triggered")
         if member.direct_jid == self._xmpp.jid.bare():
             self._last_sender = new_nick
+            self._logger.debug(f"Nick was successfully changed to {new_nick}")
             return
 
         self._loop.create_task(
@@ -873,12 +878,13 @@ class XmppRoomHandler():
         )
 
     def on_topic_changed(self, member, new_topic, *, muc_nick, **kwargs):
+        self._logger.debug("The topic callback has been triggered")
         topic = new_topic.any()
 
         if not topic:
             return
 
-        self._logger.info("Changed the room name to ", topic)
+        self._logger.debug("Changed the room name to ", topic)
 
         self._loop.create_task(
             self._telegram.send_event(
@@ -888,8 +894,11 @@ class XmppRoomHandler():
 
     def process_message(self, message: Message, member: Occupant, source,
                         **kwargs):
+        self._logger.debug("The message callback has been triggered")
+
         # Not handling your own messages
         if member == self._room.me:
+            self._logger.debug("Recieved your own message, return")
             return
 
         if message.xep0066_oob:
@@ -937,6 +946,9 @@ class XmppRoomHandler():
 
     async def send_attachment(self, sender: str, url: str, fname: str,
                               fsize: int, mime: str):
+        self._logger.debug(
+            f"Received telegram attachment {fname} from {sender}"
+        )
         slot = await self._xmpp.get_slot(fname, fsize, mime)
 
         if slot is None:
@@ -993,6 +1005,9 @@ class XmppRoomHandler():
                     yield chunk
 
     async def _set_nick(self, sender: str):
+        self._logger.debug(
+            f"Changing nick to {sender}"
+        )
         sender = demoji.replace(sender, "")
         try:
             await self._room.set_nick(sender)
@@ -1037,10 +1052,18 @@ def main():
     )
     args = parser.parse_args()
 
-    logging.basicConfig(
-        format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
-        level=(logging.DEBUG if args.verbose else logging.INFO)
-    )
+    if args.verbose:
+        logging.basicConfig(
+            filename="jabagram.log",
+            filemode='a',
+            format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
+            level=logging.DEBUG
+        )
+    else:
+        logging.basicConfig(
+            format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
+            level=logging.INFO
+        )
 
     logger = logging.Logger("Main")
 
