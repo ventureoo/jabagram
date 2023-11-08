@@ -921,9 +921,6 @@ class XmppRoomHandler():
 
             await self._set_nick(sender)
 
-            while self._last_sender != sender:
-                await asyncio.sleep(0.1)
-
             (base, tracker) = self._room.send_message_tracked(msg)
 
             def state_callback(state, response):
@@ -972,10 +969,6 @@ class XmppRoomHandler():
         async with self._message_lock:
             try:
                 await self._set_nick(sender)
-
-                while self._last_sender != sender:
-                    await asyncio.sleep(0.1)
-
                 await self._room.send_message(msg)
             except Exception:
                 self._logger.exception("Error while sending attachment")
