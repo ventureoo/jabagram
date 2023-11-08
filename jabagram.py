@@ -888,7 +888,7 @@ class XmppRoomHandler():
     def process_message(self, message: Message, member: Occupant, source,
                         **kwargs):
         # Not handling your own messages
-        if member.direct_jid == self._xmpp.jid.bare():
+        if member == self._room.me:
             return
 
         if message.xep0066_oob:
