@@ -223,7 +223,7 @@ class XmppClient(metaclass=Singleton):
         room.on_message.connect(xmpp_handler.process_message)
         room.on_leave.connect(xmpp_handler.on_leave)
         room.on_exit.connect(xmpp_handler.on_exit)
-        room.on_join.connect(xmpp_handler.on_muc_enter)
+        room.on_muc_enter.connect(xmpp_handler.on_muc_enter)
         room.on_nick_changed.connect(xmpp_handler.on_nick_changed)
         room.on_topic_changed.connect(xmpp_handler.on_topic_changed)
 
@@ -823,6 +823,7 @@ class XmppRoomHandler():
             f"XmppRoomHandler ({str(room.jid.bare())})"
         )
         self._last_sender = None
+        self._nick_changed = False
         self._message_lock = asyncio.Lock()
         self._logger.info("New XmppRoomHandler created")
 
@@ -851,22 +852,25 @@ class XmppRoomHandler():
                     self._telegram.send_event(nick, "left the room")
                 )
 
-    def on_muc_enter(self, member, **kwargs):
-        self._logger.debug("The enter callback has been triggered")
-        if member.direct_jid == self._xmpp.jid.bare():
+    def on_muc_enter(self, presence, member, *,
+                     muc_status_codes=set(), **kwargs):
+        nick = member.nick
+
+        if nick.endswith("(Telegram)") or nick == BRIDGE_DEFAULT_NAME:
             return
 
-        nick = member.nick
-        if not nick.endswith("(Telegram)") and not BRIDGE_DEFAULT_NAME:
-            self._loop.create_task(
-                self._telegram.send_event(nick, "joined the room")
-            )
+        self._loop.create_task(
+            self._telegram.send_event(nick, "joined the room")
+        )
 
     def on_nick_changed(self, member, old_nick, new_nick, *,
                         muc_status_codes=None, **kwargs):
-        self._logger.debug("The nick callback has been triggered")
-        if member.direct_jid == self._xmpp.jid.bare():
-            self._last_sender = new_nick
+        nick = member.nick
+
+        if nick.endswith("(Telegram)") or nick == BRIDGE_DEFAULT_NAME:
+            if nick == self._last_sender:
+                self._nick_changed = True
+
             self._logger.debug(f"Nick was successfully changed to {new_nick}")
             return
 
@@ -893,20 +897,9 @@ class XmppRoomHandler():
 
     def process_message(self, message: Message, member: Occupant, source,
                         **kwargs):
-        self._logger.debug("The message callback has been triggered")
+        nick = member.nick
 
-        # 10 circles of hell to see if we're getting our own messages across
-        if member.nick.endswith("(Telegram)"):
-            self._logger.debug("Did we get a message from ourselves? Really?")
-            return
-
-        if message.from_:
-            if message.from_.bare() == self._xmpp.jid.bare():
-                self._logger.debug("Some strange things happens")
-                return
-
-        # Not handling your own messages
-        if member.direct_jid.bare() == self._xmpp.jid.bare():
+        if nick.endswith("(Telegram)") or nick == BRIDGE_DEFAULT_NAME:
             self._logger.debug("Recieved your own message, return")
             return
 
@@ -1017,9 +1010,16 @@ class XmppRoomHandler():
         self._logger.debug(
             f"Changing nick to {sender}"
         )
+
         sender = demoji.replace(sender, "")
         try:
+            self._last_sender = sender
+            self._nick_changed = False
             await self._room.set_nick(sender)
+
+            while not self._nick_changed:
+                self._logger.debug("Waiting for a nickname change...")
+                await asyncio.sleep(0.01)
         except ValueError as ex:
             self._logger.exception(
                 "An invalid user name has been passed", ex
