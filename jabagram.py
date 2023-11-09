@@ -535,9 +535,12 @@ class TelegramChatHandler():
             fname = sticker.get("set_name") + " " + sticker.get("emoji")
 
             is_video = sticker.get("is_video")
+            is_animated = sticker.get("is_animated")
 
             if is_video:
                 fname += ".mp4"
+            elif not is_animated:
+                fname += ".webp"
 
             await self._xmpp.send_attachment(
                 sender=name,
