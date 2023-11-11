@@ -868,13 +868,9 @@ class XmppRoomHandler():
 
     def on_nick_changed(self, member, old_nick, new_nick, *,
                         muc_status_codes=None, **kwargs):
-        nick = member.nick
-
-        if nick.endswith("(Telegram)") or nick == BRIDGE_DEFAULT_NAME:
-            if nick == self._last_sender:
+        if new_nick.endswith("(Telegram)") or new_nick == BRIDGE_DEFAULT_NAME:
+            if new_nick == self._last_sender:
                 self._nick_changed = True
-            else:
-                self._nick_changed = False
 
             self._logger.debug(f"Nick was successfully changed to {new_nick}")
             return
