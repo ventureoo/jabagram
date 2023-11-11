@@ -869,8 +869,8 @@ class XmppRoomHandler():
     def on_nick_changed(self, member, old_nick, new_nick, *,
                         muc_status_codes=None, **kwargs):
         if new_nick.endswith("(Telegram)") or new_nick == BRIDGE_DEFAULT_NAME:
-            self._nick_changed = True
             self._logger.debug(f"Nick was successfully changed to {new_nick}")
+            self._last_sender = new_nick
             return
 
         self._loop.create_task(
@@ -1006,20 +1006,16 @@ class XmppRoomHandler():
                     yield chunk
 
     async def _set_nick(self, sender: str):
+        if sender == self._last_sender:
+            return
+
         self._logger.debug(
             f"Changing nick to {sender}"
         )
 
         sender = demoji.replace(sender, "")
         try:
-            self._last_sender = sender
-            self._nick_changed = False
             await self._room.set_nick(sender)
-
-            for _ in range(3):
-                if not self._nick_changed:
-                    await asyncio.sleep(0.1)
-
         except ValueError as ex:
             self._logger.exception(
                 "An invalid user name has been passed", ex
