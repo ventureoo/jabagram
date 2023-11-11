@@ -869,9 +869,7 @@ class XmppRoomHandler():
     def on_nick_changed(self, member, old_nick, new_nick, *,
                         muc_status_codes=None, **kwargs):
         if new_nick.endswith("(Telegram)") or new_nick == BRIDGE_DEFAULT_NAME:
-            if new_nick == self._last_sender:
-                self._nick_changed = True
-
+            self._nick_changed = True
             self._logger.debug(f"Nick was successfully changed to {new_nick}")
             return
 
@@ -1018,9 +1016,10 @@ class XmppRoomHandler():
             self._nick_changed = False
             await self._room.set_nick(sender)
 
-            while not self._nick_changed:
-                self._logger.debug("Waiting for a nickname change...")
-                await asyncio.sleep(0.01)
+            for _ in range(3):
+                if not self._nick_changed:
+                    await asyncio.sleep(0.1)
+
         except ValueError as ex:
             self._logger.exception(
                 "An invalid user name has been passed", ex
