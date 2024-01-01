@@ -1017,10 +1017,11 @@ class XmppRoomHandler():
         sender = demoji.replace(sender, "")
         try:
             await self._room.set_nick(sender)
-        except ValueError as ex:
-            self._logger.exception(
-                "An invalid user name has been passed", ex
+        except ValueError:
+            self._logger.error(
+                "An invalid user name has been passed: %s", sender
             )
+            await self._room.set_nick(BRIDGE_DEFAULT_NAME)
 
     async def unbridge(self):
         msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
