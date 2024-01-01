@@ -26,6 +26,7 @@ import argparse
 import mimetypes
 import demoji
 
+from os import path
 from json import dumps
 from datetime import datetime
 from collections import OrderedDict
@@ -1059,7 +1060,7 @@ def main():
 
     if args.verbose:
         logging.basicConfig(
-            filename="jabagram.log",
+            filename=None if path.exists("/.dockerenv") else "jabagram.log",
             filemode='a',
             format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
             level=logging.DEBUG
