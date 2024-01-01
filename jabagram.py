@@ -154,7 +154,7 @@ class XmppClient(metaclass=Singleton):
         self._data = ChatManager()
         self._jid = JID.fromstr(login)
         self._client = PresenceManagedClient(
-            self._jid, aioxmpp.make_security_layer(password)
+            self._jid, aioxmpp.make_security_layer(password, no_verify=True)
         )
         self._logger = logging.getLogger("XmppClient")
         self._muc = None
