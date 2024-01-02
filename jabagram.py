@@ -81,32 +81,32 @@ BRIDGE_DEFAULT_NAME = "Telegram Bridge"
 class Singleton(type):
     _instances = {}
 
-    def __call__(c, *args, **kwargs):
-        if c not in c._instances:
-            c._instances[c] = super(Singleton, c).__call__(*args, **kwargs)
-        return c._instances[c]
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super(Singleton, cls).__call__(*args, **kwargs)
+        return cls._instances[cls]
 
 
 class ChatManager(metaclass=Singleton):
     def __init__(self, path):
         self._path = path
-        self._logger = logging.getLogger("ChatManager")
+        self._logger = logging.getLogger(self.__class__.__name__)
         self._handlers = {}
         self._pending_rooms = {}
 
     def add_chats_pair(self, chat, muc):
-        with dbm.open(self._path, "w") as db:
-            db[str(chat)] = str(muc)
-            db.sync()
+        with dbm.open(self._path, "w") as database:
+            database[str(chat)] = str(muc)
+            database.sync()
 
     def load_chats(self, callback):
         try:
-            with dbm.open(self._path, "c") as db:
-                chat_id = db.firstkey()
+            with dbm.open(self._path, "c") as database:
+                chat_id = database.firstkey()
                 while chat_id is not None:
-                    muc = db.get(chat_id).decode()
+                    muc = database.get(chat_id).decode()
                     callback(int(chat_id), JID.fromstr(muc))
-                    chat_id = db.nextkey(chat_id)
+                    chat_id = database.nextkey(chat_id)
         except Exception:
             self._logger.exception(
                 "Failed to load chats from database"
@@ -114,11 +114,11 @@ class ChatManager(metaclass=Singleton):
 
     def remove_chat(self, chat_id: int):
         try:
-            with dbm.open(self._path, "c") as db:
-                del db[str(chat_id)]
+            with dbm.open(self._path, "c") as database:
+                del database[str(chat_id)]
         except Exception:
             self._logger.exception(
-                f"Failed to remove chat {chat_id} from database"
+                "Failed to remove chat %d from database", chat_id
             )
 
     @property
@@ -156,8 +156,8 @@ class XmppClient(metaclass=Singleton):
         self._client = PresenceManagedClient(
             self._jid, aioxmpp.make_security_layer(password, no_verify=True)
         )
-        self._logger = logging.getLogger("XmppClient")
-        self._muc = None
+        self._logger = logging.getLogger(self.__class__.__name__)
+        self._muc: MUCClient = None
         self._key = key
         self._service_addr = None
 
@@ -266,7 +266,7 @@ class TelegramApiError(Exception):
 class TelegramClient(metaclass=Singleton):
     def __init__(self, token, xmpp_jid):
         self._token = token
-        self._logger = logging.getLogger("TelegramClient")
+        self._logger = logging.getLogger(self.__class__.__name__)
         self._loop = asyncio.get_event_loop()
         self._data = ChatManager()
         self._xmpp_jid = xmpp_jid
@@ -347,7 +347,7 @@ class TelegramClient(metaclass=Singleton):
                             elif message.get("new_chat_title"):
                                 title = message.get("new_chat_title")
                                 self._logger.info(
-                                    f"New chat title recieved: {title}"
+                                    "New chat title recieved: %s", title
                                 )
                                 self._loop.create_task(
                                     handler.process_on_title_changed(
@@ -397,7 +397,7 @@ class TelegramClient(metaclass=Singleton):
                 retry_after = error.retry_after
                 if retry_after:
                     self._logger.warning(
-                        f"Too many requests, sleeping on {retry_after}s..."
+                        "Too many requests, sleeping on %d sec...", retry_after
                     )
                     await asyncio.sleep(retry_after)
                 else:
@@ -407,9 +407,9 @@ class TelegramClient(metaclass=Singleton):
                     "Connection failure while getting updates: %s", error
                 )
 
-    def unbridge_chat(self, chat_id):
+    def unbridge_chat(self, chat_id: int):
         del self._data.handlers[chat_id]
-        self._logger.info(f"Unbridging chat with id {chat_id}")
+        self._logger.info("Unbridging chat with id %d", chat_id)
         self._data.remove_chat(chat_id)
 
     async def _bridge_command(self, chat_id, text):
@@ -453,20 +453,21 @@ class TelegramChatHandler():
         self._telegram = TelegramClient()
         self._chat = chat
         self._message_map = message_map
-        self._xmpp = None
+        self._xmpp: XmppRoomHandler = None
         self._logger = logging.getLogger(f"TelegramChatHandler ({str(chat)})")
         self._reply_map = MessageMap(MESSAGE_MAP_SIZE)
         self._logger.info("New TelegramChatHandler created")
 
-    async def process_message(self, message: dict):
-        sender = message.get('from')
-        name = sender.get('first_name')
+    async def process_message(self, message: dict) -> None:
+        sender: dict = message['from']
+        name: str = sender['first_name']
+        last_name: str | None = sender.get("last_name")
 
-        if sender.get("last_name") is not None:
-            name += " " + sender.get("last_name")
+        if last_name:
+            name += " " + last_name
 
         name += " (Telegram)"
-        message_id = message['message_id']
+        message_id: int = message['message_id']
 
         text = message.get("text") or message.get("caption")
         attachment = message.get("photo") or message.get("document") \
@@ -561,6 +562,9 @@ class TelegramChatHandler():
                 f"{edit.get('message_id')}"
             )
             return
+        else:
+            self._logger.info("Found stanaza %s matching Telegram message %s",
+                              stanza_id, edit["message_id"])
 
         reply = edit.get("reply_to_message")
 
@@ -748,17 +752,19 @@ class TelegramChatHandler():
                         text=f"{formatted_reply}\n{sender}: {body}",
                         message_id=telegram_id
                     )
+
+            self._reply_map.add(body, message['message_id'])
+            self._message_map.add(stanza_id, message['message_id'])
         except TelegramApiError:
             self._logger.exception("Error while editing a message")
 
-        self._reply_map.add(body, message['message_id'])
-        self._message_map.add(stanza_id, message['message_id'])
 
     async def process_on_join(self, user: dict, event_id: int):
-        name = user.get("first_name")
+        name: str = user["first_name"]
+        last_name: str | None = user.get("last_name")
 
-        if user.get("last_name"):
-            name += " " + user.get("last_name")
+        if last_name:
+            name += " " + last_name
 
         await self._xmpp.send_message(
             f"*{name}* joined the chat", BRIDGE_DEFAULT_NAME, event_id
@@ -771,16 +777,17 @@ class TelegramChatHandler():
         )
 
     async def process_on_leave(self, user: dict, event_id: int):
-        name = user.get("first_name")
+        name: str = user["first_name"]
+        last_name: str | None = user.get("last_name")
 
-        if user.get("last_name"):
-            name += " " + user.get("last_name")
+        if last_name:
+            name += " " + last_name
 
         await self._xmpp.send_message(
             f"*{name}* left the chat", BRIDGE_DEFAULT_NAME, event_id
         )
 
-    async def send_event(self, actor: str, event: str):
+    async def send_event(self, event: str, actor: str | None = None):
         try:
             if actor:
                 await self._telegram.api_call(
@@ -798,7 +805,7 @@ class TelegramChatHandler():
             )
 
     async def unbridge(self):
-        await self.send_event(None, UNBRIDGE_TELEGRAM_MESSAGE)
+        await self.send_event(UNBRIDGE_TELEGRAM_MESSAGE)
         await self._telegram.api_call("leaveChat", chat_id=self._chat)
         self._telegram.unbridge_chat(self._chat)
         self._xmpp = None
@@ -853,7 +860,7 @@ class XmppRoomHandler():
         if muc_leave_mode == LeaveMode.NORMAL:
             if not nick.endswith("(Telegram)") and not BRIDGE_DEFAULT_NAME:
                 self._loop.create_task(
-                    self._telegram.send_event(nick, "left the room")
+                    self._telegram.send_event("left the room", nick)
                 )
 
     def on_muc_enter(self, presence, member, *,
@@ -864,7 +871,7 @@ class XmppRoomHandler():
             return
 
         self._loop.create_task(
-            self._telegram.send_event(nick, "joined the room")
+            self._telegram.send_event("joined the room", nick)
         )
 
     def on_nick_changed(self, member, old_nick, new_nick, *,
@@ -876,7 +883,7 @@ class XmppRoomHandler():
 
         self._loop.create_task(
             self._telegram.send_event(
-                old_nick, f"has changed nickname to \"{new_nick}\""
+                 f"has changed nickname to \"{new_nick}\"", old_nick
             )
         )
 
@@ -891,7 +898,7 @@ class XmppRoomHandler():
 
         self._loop.create_task(
             self._telegram.send_event(
-                member.nick, f"has changed room name to \"{topic}\""
+                f"has changed room name to \"{topic}\"", member.nick
             )
         )
 
@@ -923,17 +930,17 @@ class XmppRoomHandler():
                 )
             )
 
-    async def send_message(self, text: str, sender: str, telegram_id: str):
+    async def send_message(self, text: str, sender: str, telegram_id: int):
         msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
         msg.body[None] = text
 
-        self._logger.info(f"Recieved message from telegram: {telegram_id}")
+        self._logger.info("Recieved message from telegram: %s", telegram_id)
         try:
             await self._message_lock.acquire()
 
             await self._set_nick(sender)
 
-            (base, tracker) = self._room.send_message_tracked(msg)
+            (_, tracker) = self._room.send_message_tracked(msg)
 
             def state_callback(state, response):
                 if state != MessageState.DELIVERED_TO_RECIPIENT:
@@ -989,6 +996,7 @@ class XmppRoomHandler():
                 self._logger.exception("Error while sending attachment")
 
     async def edit_message(self, stanza_id: str, text: str):
+        self._logger.info("Editing the stanza %s", stanza_id)
         msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
         msg.body[None] = text
         msg.xep0308_replace = Replace()
@@ -1010,9 +1018,7 @@ class XmppRoomHandler():
         if sender == self._last_sender:
             return
 
-        self._logger.debug(
-            f"Changing nick to {sender}"
-        )
+        self._logger.debug("Changing nick to %s", sender)
 
         sender = demoji.replace(sender, "")
         try:
