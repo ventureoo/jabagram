@@ -213,8 +213,7 @@ class XmppClient(metaclass=Singleton):
 
     def _add_chat(self, chat, muc):
         room, room_future = self._muc.join(muc.bare(), BRIDGE_DEFAULT_NAME,
-                                           history=History(maxstanzas=0),
-                                           autorejoin=False)
+                                           history=History(maxstanzas=0))
         map = MessageMap(MESSAGE_MAP_SIZE)
 
         xmpp_handler = XmppRoomHandler(room, room_future, map)
