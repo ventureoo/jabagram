@@ -673,7 +673,14 @@ class TelegramChatHandler():
 
                 try:
                     message = None
-                    if mime.startswith("image"):
+                    if mime == "image/gif":
+                        message = await self._telegram.api_call(
+                            "sendAnimation", chat_id=self._chat,
+                            animation="attach://file", _file=form_data,
+                            caption=f"{sender}: ",
+                            caption_entities=self._make_bold_entity(sender, 0)
+                        )
+                    elif mime.startswith("image"):
                         message = await self._telegram.api_call(
                             "sendPhoto", chat_id=self._chat,
                             photo="attach://file", _file=form_data,
