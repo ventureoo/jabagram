@@ -1,4 +1,2 @@
 aiohttp
-aioxmpp
-pytz
-demoji
+slixmpp

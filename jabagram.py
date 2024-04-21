@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-# Copyright (C) 2023 Vasiliy Stelmachenok <ventureo@yandex.ru>
+# Copyright (C) 2024 Vasiliy Stelmachenok <ventureo@yandex.ru>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,30 +15,25 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-import aioxmpp
-import aiohttp
-import asyncio
-import configparser
-import logging
-import dbm
-import argparse
-import mimetypes
-import demoji
 
-from os import path
-from json import dumps
-from datetime import datetime
-from collections import OrderedDict
+import argparse
+import asyncio
+import aiohttp
+import configparser
+import dbm
+import logging
+import mimetypes
+import stringprep
+
 from aiohttp import ClientConnectionError
-from aioxmpp import PresenceManagedClient, JID
-from aioxmpp.muc import Room, Occupant
-from aioxmpp.muc.xso import History
-from aioxmpp.muc.service import LeaveMode
-from aioxmpp.stanza import Message
-from aioxmpp.tracking import MessageState
-from aioxmpp.utils import namespaces
-from aioxmpp.misc import Replace
-from aioxmpp.misc.oob import OOBExtension
+from collections import OrderedDict
+from datetime import datetime
+from functools import lru_cache
+from json import dumps
+from os import path
+from slixmpp import ClientXMPP
+from slixmpp.jid import JID, InvalidJID
+from slixmpp.plugins.xep_0363.http_upload import HTTPError
 
 # Store the last 150 message IDs in the map
 MESSAGE_MAP_SIZE = 150
@@ -78,6 +72,23 @@ This chat was automatically unbridged due to a bot kick in Telegram.
 BRIDGE_DEFAULT_NAME = "Telegram Bridge"
 
 
+# XMPP does not support all available characters for resourcepart in JIDs, so
+# we need to filter a range of characters.
+BLACKLIST_USERNAME_CHARS = (
+    stringprep.in_table_c12,
+    stringprep.in_table_c21,
+    stringprep.in_table_c22,
+    stringprep.in_table_c3,
+    stringprep.in_table_c4,
+    stringprep.in_table_c5,
+    stringprep.in_table_c6,
+    stringprep.in_table_c7,
+    stringprep.in_table_c8,
+    stringprep.in_table_a1,
+    stringprep.in_table_c9
+)
+
+
 class Singleton(type):
     _instances = {}
 
@@ -88,8 +99,8 @@ class Singleton(type):
 
 
 class ChatManager(metaclass=Singleton):
-    def __init__(self, path):
-        self._path = path
+    def __init__(self, fpath):
+        self._path = fpath
         self._logger = logging.getLogger(self.__class__.__name__)
         self._handlers = {}
         self._pending_rooms = {}
@@ -105,9 +116,9 @@ class ChatManager(metaclass=Singleton):
                 chat_id = database.firstkey()
                 while chat_id is not None:
                     muc = database.get(chat_id).decode()
-                    callback(int(chat_id), JID.fromstr(muc))
+                    callback(chat_id, muc)
                     chat_id = database.nextkey(chat_id)
-        except Exception:
+        except dbm.error:
             self._logger.exception(
                 "Failed to load chats from database"
             )
@@ -116,7 +127,7 @@ class ChatManager(metaclass=Singleton):
         try:
             with dbm.open(self._path, "c") as database:
                 del database[str(chat_id)]
-        except Exception:
+        except dbm.error:
             self._logger.exception(
                 "Failed to remove chat %d from database", chat_id
             )
@@ -149,109 +160,66 @@ class MessageMap():
             self._map.popitem(last=False)
 
 
-class XmppClient(metaclass=Singleton):
-    def __init__(self, login: str, password: str, key: str):
-        self._data = ChatManager()
-        self._jid = JID.fromstr(login)
-        self._client = PresenceManagedClient(
-            self._jid, aioxmpp.make_security_layer(password, no_verify=True)
-        )
+class XmppClient(ClientXMPP, metaclass=Singleton):
+    def __init__(self, data: ChatManager, jid: str,
+                 password: str, key: str):
+        ClientXMPP.__init__(self, jid, password)
+        self._data = data
         self._logger = logging.getLogger(self.__class__.__name__)
-        self._muc: MUCClient = None
         self._key = key
-        self._service_addr = None
 
-    def _invite_callback(self, stanza, muc, inviter_address,
-                         mode, *, reason=None, **kwargs):
-        muc_address = str(muc)
+        # Used XEPs
+        self.register_plugin('xep_0030')
+        self.register_plugin('xep_0249')
+        self.register_plugin('xep_0071')
+        self.register_plugin('xep_0363')
+        self.register_plugin('xep_0308')
+        self.register_plugin('xep_0045')
+        self.register_plugin('xep_0066')
+        self.register_plugin('xep_0199')
 
-        if not self._data.pending_rooms.get(muc_address):
+        # Common event handlers
+        self.add_event_handler("session_start", self._session_start)
+        self.add_event_handler('groupchat_direct_invite', self._invite_callback)
+
+
+    def _invite_callback(self, invite):
+        muc = str(invite['groupchat_invite']['jid'])
+        reason = invite['groupchat_invite']['reason']
+
+        chat_id = self._data.pending_rooms.get(muc)
+        if not chat_id:
             return
 
         if reason != self._key:
-            self._logger.info(f"Wrong key was recieved: {reason}")
+            self._logger.info("Wrong key was recieved: %s", reason)
             return
 
-        chat_id = self._data.pending_rooms.get(muc_address)
-        del self._data.pending_rooms[muc_address]
+        del self._data.pending_rooms[muc]
 
         self._add_chat(chat_id, muc)
         self._data.add_chats_pair(chat_id, muc)
 
-    async def run(self):
-        self._muc = self._client.summon(aioxmpp.MUCClient)
-        self._muc.on_muc_invitation.connect(self._invite_callback)
-        disco = self._client.summon(aioxmpp.DiscoClient)
+    async def _session_start(self, _):
+        await self.get_roster()
+        self.send_presence()
+        self._data.load_chats(self._add_chat)
 
-        async with self._client.connected():
-            items = await disco.query_items(
-                self._client.local_jid.replace(localpart=None, resource=None),
-                timeout=10
-            )
+    def _add_chat(self, chat: str, muc: str):
+        message_map = MessageMap(MESSAGE_MAP_SIZE)
 
-            # Check if server supports XEP-0363
-            addrs = [item.jid for item in items.items if not item.node
-                     if namespaces.xep0363_http_upload in
-                     (await disco.query_info(item.jid)).features]
-
-            if addrs:
-                self._service_addr = addrs[0]
-                self._logger.info(
-                    "Found address of HTTP Upload service: %s",
-                    self._service_addr
-                )
-            else:
-                self._logger.warning(
-                    "XMPP server doesn't support XEP-0363"
-                    "It is not possible to send attachments."
-                )
-
-            self._data.load_chats(self._add_chat)
-
-            while True:
-                await asyncio.sleep(1)
-
-    def _add_chat(self, chat, muc):
-        room, room_future = self._muc.join(muc.bare(), BRIDGE_DEFAULT_NAME,
-                                           history=History(maxstanzas=0))
-        map = MessageMap(MESSAGE_MAP_SIZE)
-
-        xmpp_handler = XmppRoomHandler(room, room_future, map)
-        telegram_handler = TelegramChatHandler(chat, map)
+        xmpp_handler = XmppRoomHandler(JID(muc), message_map)
+        telegram_handler = TelegramChatHandler(int(chat), message_map)
 
         # Event handlers
-        room.on_message.connect(xmpp_handler.process_message)
-        room.on_leave.connect(xmpp_handler.on_leave)
-        room.on_exit.connect(xmpp_handler.on_exit)
-        room.on_muc_enter.connect(xmpp_handler.on_muc_enter)
-        room.on_nick_changed.connect(xmpp_handler.on_nick_changed)
-        room.on_topic_changed.connect(xmpp_handler.on_topic_changed)
+        self.add_event_handler(f"muc::{muc}::message", xmpp_handler.process_message)
+        self.add_event_handler(f"muc::{muc}::got_online", xmpp_handler.nick_change_handler)
+        self.plugin['xep_0045'].join_muc(muc, BRIDGE_DEFAULT_NAME)
 
         xmpp_handler.pair(telegram_handler)
         telegram_handler.pair_xmpp(xmpp_handler)
 
-        self._data.handlers[chat] = telegram_handler
-
-    async def get_slot(self, fname, fsize, mime):
-        if not self._service_addr:
-            self._logger.warning(
-                "File transfer via XEP-0363 is not supported by server"
-            )
-            return None
-
-        slot = await self._client.send(
-            aioxmpp.IQ(
-                to=self._service_addr,
-                type_=aioxmpp.IQType.GET,
-                payload=aioxmpp.httpupload.Request(fname, fsize, mime)
-            )
-        )
-
-        return slot
-
-    @property
-    def jid(self):
-        return self._jid
+        self._data.handlers[int(chat)] = telegram_handler
 
 
 class TelegramApiError(Exception):
@@ -263,11 +231,11 @@ class TelegramApiError(Exception):
 
 
 class TelegramClient(metaclass=Singleton):
-    def __init__(self, token, xmpp_jid):
+    def __init__(self, data, token, xmpp_jid):
         self._token = token
         self._logger = logging.getLogger(self.__class__.__name__)
         self._loop = asyncio.get_event_loop()
-        self._data = ChatManager()
+        self._data = data
         self._xmpp_jid = xmpp_jid
 
     async def api_call(self, method, **kwargs):
@@ -335,6 +303,7 @@ class TelegramClient(metaclass=Singleton):
                         handler = self._data.handlers.get(chat_id)
 
                         if handler:
+                            self._logger.info("Get message: %s", message)
                             if message.get("new_chat_members"):
                                 members = message.get("new_chat_members")
                                 for member in members:
@@ -416,7 +385,7 @@ class TelegramClient(metaclass=Singleton):
             room = text.split(" ")[1]
 
             # Check that MUC jid is valid
-            JID.fromstr(room)
+            JID(room)
 
             # Check if this chat has already been attempted to pair
             queue = self._data.pending_rooms
@@ -437,14 +406,14 @@ class TelegramClient(metaclass=Singleton):
             )
         except TelegramApiError as err:
             self._logger.exception(err)
-        except ValueError:
+        except InvalidJID:
             await self.api_call(
                 "sendMessage", chat_id=chat_id,
                 text=INVALID_JID_MESSAGE
             )
 
-    def get_file_url(self, path):
-        return f"https://api.telegram.org/file/bot{self._token}/{path}"
+    def get_file_url(self, fpath):
+        return f"https://api.telegram.org/file/bot{self._token}/{fpath}"
 
 
 class TelegramChatHandler():
@@ -465,7 +434,6 @@ class TelegramChatHandler():
         if last_name:
             name += " " + last_name
 
-        name += " (Telegram)"
         message_id: int = message['message_id']
 
         text = message.get("text") or message.get("caption")
@@ -526,7 +494,9 @@ class TelegramChatHandler():
             else:
                 await self._xmpp.send_message(text, name, message_id)
 
-            self._logger.debug(f"Reply from telegram: {hash(text)}, '{text}'")
+            self._logger.debug(
+                "Reply from telegram: %d (%s)", hash(text), text
+            )
             self._reply_map.add(text, message_id)
 
         if sticker:
@@ -557,13 +527,12 @@ class TelegramChatHandler():
 
         if not stanza_id:
             self._logger.warning(
-                "Can't find any messages in map with id "
-                f"{edit.get('message_id')}"
+                "Can't find any messages in map with id: %s", edit.get('message_id')
             )
             return
-        else:
-            self._logger.info("Found stanaza %s matching Telegram message %s",
-                              stanza_id, edit["message_id"])
+
+        self._logger.info("Found stanaza %s matching Telegram message %s",
+                          stanza_id, edit["message_id"])
 
         reply = edit.get("reply_to_message")
 
@@ -595,10 +564,11 @@ class TelegramChatHandler():
         parts = []
 
         for line in message.splitlines():
-            # Ignore nested replies
-            if _safe_get(line, 0) == ">" and _safe_get(line, 2) == ">":
-                continue
-            elif _safe_get(line, 0) == ">":
+            if _safe_get(line, 0) == ">":
+                # Ignore nested replies
+                if _safe_get(line, 2) == ">":
+                    continue
+
                 line = line.replace("> ", "")
 
                 # Attempt to detect a replies format of some mobile clients
@@ -630,13 +600,13 @@ class TelegramChatHandler():
                     entities=self._make_bold_entity(sender, 0)
                 )
             else:
-                id = self._reply_map.get(reply)
+                telegram_id = self._reply_map.get(reply)
 
-                if id:
+                if telegram_id:
                     message = await self._telegram.api_call(
                         "sendMessage", chat_id=self._chat,
                         text=f"{sender}: {body}",
-                        reply_to_message_id=id,
+                        reply_to_message_id=telegram_id,
                         entities=self._make_bold_entity(sender, 0)
                     )
                 else:
@@ -660,7 +630,7 @@ class TelegramChatHandler():
             async with session.get(url) as resp:
                 if resp.status not in (200, 201):
                     self._logger.error(
-                        f"Error while getting {url} file: {resp.status}"
+                        "Error while getting %s file: %d", url, resp.status
                     )
                     return
 
@@ -725,9 +695,12 @@ class TelegramChatHandler():
 
         if telegram_id is None:
             self._logger.debug(
-                f"Message with {stanza_id} not found in the message map"
+                "Message with %s not found in the message map", stanza_id
             )
             return
+
+        self._logger.info("Found Telegram message %s matching XMPP stanza %s",
+                          telegram_id, stanza_id)
 
         try:
             if not reply:
@@ -737,11 +710,9 @@ class TelegramChatHandler():
                     text=f"{sender}: {text}",
                 )
             else:
-                id = self._reply_map.get(reply)
-
-                if id:
+                if self._reply_map.get(reply):
                     self._logger.debug(
-                        f"Found reply to a message with ID {id} in reply map"
+                        "Found reply to a message with ID %s in reply map", id
                     )
                     message = await self._telegram.api_call(
                         "editMessageText", chat_id=self._chat,
@@ -750,7 +721,7 @@ class TelegramChatHandler():
                     )
                 else:
                     self._logger.debug(
-                        f"Reply with body {reply} not found in the reply map"
+                        "Reply with body %s not found in the reply map", reply
                     )
                     formatted_reply = "> " + reply.replace("\n", "\n> ")
                     message = await self._telegram.api_call(
@@ -807,7 +778,7 @@ class TelegramChatHandler():
                 )
         except TelegramApiError:
             self._logger.exception(
-                f"An error occurred while sending the event: {event}"
+                "An error occurred while sending the event: %s", event
             )
 
     async def unbridge(self):
@@ -829,221 +800,145 @@ class TelegramChatHandler():
 
 
 class XmppRoomHandler():
-    def __init__(self, room: Room, room_future, message_map: MessageMap):
-        self._room: Room = room
-        self._room_future = room_future
+    def __init__(self, muc: JID, message_map: MessageMap):
         self._loop = asyncio.get_event_loop()
         self._xmpp = XmppClient()
-        self._telegram: TelegramChatHandler = None
+        self._telegram = None
         self._message_map: MessageMap = message_map
-        self._logger = logging.getLogger(
-            f"XmppRoomHandler ({str(room.jid.bare())})"
-        )
-        self._last_sender = None
-        self._nick_changed = False
+        self._logger = logging.getLogger(f"XmppRoomHandler ({muc})")
+        self._muc = muc
+        self._last_sender = BRIDGE_DEFAULT_NAME
+        self._current_telegram_message = None
         self._message_lock = asyncio.Lock()
+        self._nick_change_event = asyncio.Event()
         self._logger.info("New XmppRoomHandler created")
 
-    def on_exit(self, *, muc_leave_mode=None, muc_actor=None, muc_reason=None,
-                muc_status_codes=set(), **kwargs):
-        self._logger.debug("The exit callback has been triggered")
-        if muc_leave_mode in (LeaveMode.DISCONNECTED,
-                              LeaveMode.SYSTEM_SHUTDOWN,
-                              LeaveMode.NORMAL,
-                              LeaveMode.ERROR):
+    def process_message(self, message):
+        sender = message['mucnick']
+
+        if sender.endswith("(Telegram)") or sender == BRIDGE_DEFAULT_NAME:
+            self._logger.info("Recieved your own message")
+
+            if self._current_telegram_message:
+                self._message_map.add(self._current_telegram_message, message['id'])
+                self._message_lock.release()
+                self._current_telegram_message = None
+
             return
 
-        self._logger.info(
-            "Exit event received, execute unbridge from Telegram"
-        )
-        self._loop.create_task(self._telegram.unbridge())
-        self._telegram = None
-
-    def on_leave(self, member, *, muc_leave_mode=None, muc_actor=None,
-                 muc_reason=None, **kwargs):
-        self._logger.debug("The leave callback has been triggered")
-        nick = member.nick
-        if muc_leave_mode == LeaveMode.NORMAL:
-            if not nick.endswith("(Telegram)") and not BRIDGE_DEFAULT_NAME:
-                self._loop.create_task(
-                    self._telegram.send_event("left the room", nick)
-                )
-
-    def on_muc_enter(self, presence, member, *,
-                     muc_status_codes=set(), **kwargs):
-        nick = member.nick
-
-        if nick.endswith("(Telegram)") or nick == BRIDGE_DEFAULT_NAME:
-            return
-
-        self._loop.create_task(
-            self._telegram.send_event("joined the room", nick)
-        )
-
-    def on_nick_changed(self, member, old_nick, new_nick, *,
-                        muc_status_codes=None, **kwargs):
-        if new_nick.endswith("(Telegram)") or new_nick == BRIDGE_DEFAULT_NAME:
-            self._logger.debug(f"Nick was successfully changed to {new_nick}")
-            self._last_sender = new_nick
-            return
-
-        self._loop.create_task(
-            self._telegram.send_event(
-                 f"has changed nickname to \"{new_nick}\"", old_nick
-            )
-        )
-
-    def on_topic_changed(self, member, new_topic, *, muc_nick, **kwargs):
-        self._logger.debug("The topic callback has been triggered")
-        topic = new_topic.any()
-
-        if not topic:
-            return
-
-        self._logger.debug("Changed the room name to ", topic)
-
-        self._loop.create_task(
-            self._telegram.send_event(
-                f"has changed room name to \"{topic}\"", member.nick
-            )
-        )
-
-    def process_message(self, message: Message, member: Occupant, source,
-                        **kwargs):
-        nick = member.nick
-
-        if nick.endswith("(Telegram)") or nick == BRIDGE_DEFAULT_NAME:
-            self._logger.debug("Recieved your own message, return")
-            return
-
-        if message.xep0066_oob:
+        if message['oob']['url']:
             self._loop.create_task(
                 self._telegram.send_attachment(
-                    member.nick, message.xep0066_oob.url,
+                    sender,
+                    message['oob']['url'],
                 )
             )
-        elif message.xep0308_replace:
+        elif message['replace']['id']:
             self._loop.create_task(
                 self._telegram.edit_message(
-                    message.xep0308_replace.id_,
-                    message.body.any(), member.nick
+                    message['replace']['id'],
+                    message['body'],
+                    sender
                 )
             )
         else:
             self._loop.create_task(
                 self._telegram.send_message(
-                    member.nick, message.body.any(), message.id_
+                    sender,
+                    message['body'],
+                    message['id']
                 )
             )
 
     async def send_message(self, text: str, sender: str, telegram_id: int):
-        msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
-        msg.body[None] = text
-
         self._logger.info("Recieved message from telegram: %s", telegram_id)
-        try:
-            await self._message_lock.acquire()
-
-            await self._set_nick(sender)
-
-            (_, tracker) = self._room.send_message_tracked(msg)
-
-            def state_callback(state, response):
-                if state != MessageState.DELIVERED_TO_RECIPIENT:
-                    return
-
-                self._message_map.add(telegram_id, response.id_)
-                self._message_lock.release()
-
-            tracker.on_state_changed.connect(state_callback)
-        except Exception as ex:
-            self._logger.exception("Error occured while sending message", ex)
+        await self._message_lock.acquire()
+        await self._change_nick(sender)
+        self._current_telegram_message = telegram_id
+        self._xmpp.send_message(mto=self._muc, mbody=text, mtype='groupchat')
 
     async def send_attachment(self, sender: str, url: str, fname: str,
                               fsize: int, mime: str):
-        self._logger.debug(
-            f"Received telegram attachment {fname} from {sender}"
-        )
-        slot = await self._xmpp.get_slot(fname, fsize, mime)
+        self._logger.debug("Received telegram attachment %s from %s", fname, sender)
+        await self._change_nick(sender)
 
-        if slot is None:
-            return
+        upload_file = self._xmpp.plugin['xep_0363'].upload_file
 
-        headers = slot.put.headers
-        headers["Content-Type"] = mime
-        headers["Content-Length"] = str(fsize)
-        headers["User-Agent"] = "jabagram"
-
-        async with aiohttp.ClientSession() as session:
-            async with session.put(
-                slot.put.url, headers=headers, data=self._file_fetcher(url)
-            ) as resp:
-                if resp.status not in (200, 201):
-                    self._logger.error(
-                        f"Upload {fname} failed: {resp.status}"
-                    )
-                    return
-
-        msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
-
-        # We should force the language tag because
-        # some clients ignore attachments without it
-        # https://dev.gajim.org/gajim/gajim/-/issues/9178
-        tag = aioxmpp.structs.LanguageTag.fromstr("en")
-        msg.body[tag] = slot.get.url
-        msg.xep0066_oob = OOBExtension()
-        msg.xep0066_oob.url = slot.get.url
-
-        async with self._message_lock:
-            try:
-                await self._set_nick(sender)
-                await self._room.send_message(msg)
-            except Exception:
-                self._logger.exception("Error while sending attachment")
-
-    async def edit_message(self, stanza_id: str, text: str):
-        self._logger.info("Editing the stanza %s", stanza_id)
-        msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
-        msg.body[None] = text
-        msg.xep0308_replace = Replace()
-        msg.xep0308_replace.id_ = stanza_id
-
-        try:
-            await self._room.send_message(msg)
-        except Exception:
-            self._logger.exception("Error while editing a message")
-
-    async def _file_fetcher(self, url: str, max_chunk_size=4096):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
-                async for chunk in resp.content.iter_chunked(max_chunk_size):
-                    self._logger.debug(f"Send chunk with size {len(chunk)}")
-                    yield chunk
+                try:
+                    upload = await upload_file(
+                        filename=fname,
+                        size=fsize,
+                        content_type=mime,
+                        input_file=resp.content
+                    )
+                    html = (
+                        f'<body xmlns="http://www.w3.org/1999/xhtml">'
+                        f'<a href="{url}">{url}</a></body>'
+                    )
+                    self._logger.info(upload)
 
-    async def _set_nick(self, sender: str):
+                    message = self._xmpp.make_message(mbody=upload, mto=self._muc,
+                                                      mtype='groupchat', mhtml=html)
+                    message['oob']['url'] = upload
+                    message.send()
+                except HTTPError as error:
+                    self._logger.error("Cannot upload file: %s", error)
+
+
+    def nick_change_handler(self, presence):
+        nick = presence['from'].resource
+        if nick == self._last_sender:
+            self._nick_change_event.set()
+
+
+    async def edit_message(self, stanza_id: str, text: str):
+        self._logger.info("Editing the stanza: %s", stanza_id)
+        message = self._xmpp.make_message(mbody=text, mto=self._muc,
+                                          mtype='groupchat')
+        message['replace']['id'] = stanza_id
+        message.send()
+
+    @lru_cache(maxsize=100)
+    def _validate_name(self, sender: str) -> str:
+        valid = []
+        for char in sender:
+            for check in BLACKLIST_USERNAME_CHARS:
+                if check(char):
+                    break
+            else:
+                valid.append(char)
+
+        return "".join(valid)
+
+    async def _change_nick(self, sender: str):
+        sender = self._validate_name(sender) + " (Telegram)"
+
         if sender == self._last_sender:
             return
 
         self._logger.debug("Changing nick to %s", sender)
+        self._xmpp.send_presence(
+            pto=f"{self._muc.bare}/{sender}",
+            pfrom=self._xmpp.boundjid.full
+        )
+        self._last_sender = sender
 
-        sender = demoji.replace(sender, "")
-        try:
-            await self._room.set_nick(sender)
-        except ValueError:
-            self._logger.error(
-                "An invalid user name has been passed: %s", sender
-            )
-            await self._room.set_nick(BRIDGE_DEFAULT_NAME)
+        # To avoid getting deadlock if for some reason the nickname has not
+        # been changed, even though we have processed its validity in advance.
+        await asyncio.wait_for(self._nick_change_event.wait(), 15)
+
 
     async def unbridge(self):
-        msg = Message(type_=aioxmpp.MessageType.GROUPCHAT)
-        msg.body[None] = UNBRIDGE_XMPP_MESSAGE
-        await self._set_nick(BRIDGE_DEFAULT_NAME)
-        await self._room.send_message(msg)
-        await self._room.leave()
-
+        await self._change_nick(BRIDGE_DEFAULT_NAME)
+        self._xmpp.send_message(
+            mto=self._muc,
+            mbody=UNBRIDGE_XMPP_MESSAGE,
+            mtype='groupchat'
+        )
+        self._xmpp.plugin['xep_0045'].leave_muc(self._muc, self._last_sender)
         self._telegram = None
-        self._room = None
 
     def pair(self, telegram):
         if self._telegram:
@@ -1089,30 +984,32 @@ def main():
     try:
         config = configparser.ConfigParser()
 
-        with open(args.config, "r") as f:
+        with open(args.config, "r", encoding="utf-8") as f:
             config.read_file(f)
 
-        ChatManager(args.data)
+        database_service = ChatManager(args.data)
 
         telegram = TelegramClient(
+            database_service,
             config.get("telegram", "token"),
             config.get("xmpp", "login")
         )
         xmpp = XmppClient(
+            database_service,
             config.get("xmpp", "login"),
             config.get("xmpp", "password"),
             config.get("general", "key")
         )
 
         loop = asyncio.get_event_loop()
-        loop.create_task(xmpp.run())
         loop.create_task(telegram.run())
+        xmpp.connect()
 
         def exception_handler(_, context):
             exception = context.get("exception")
 
             if exception:
-                logger.warning("Some unhandled error occured: %s", exception)
+                logger.exception("Some unhandled error occured: %s", exception)
 
         loop.set_exception_handler(exception_handler)
         loop.run_forever()
