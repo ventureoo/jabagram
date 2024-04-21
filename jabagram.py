@@ -303,7 +303,6 @@ class TelegramClient(metaclass=Singleton):
                         handler = self._data.handlers.get(chat_id)
 
                         if handler:
-                            self._logger.info("Get message: %s", message)
                             if message.get("new_chat_members"):
                                 members = message.get("new_chat_members")
                                 for member in members:
