@@ -71,6 +71,12 @@ This chat was automatically unbridged due to a bot kick in Telegram.
 
 BRIDGE_DEFAULT_NAME = "Telegram Bridge"
 
+CONFIG_FILE_NOT_FOUND = """
+Configuration file not found.
+Perhaps you forgot to rename config.ini.example?
+Use the -c key to specify the full path to the config.
+"""
+
 
 # XMPP does not support all available characters for resourcepart in JIDs, so
 # we need to filter a range of characters.
@@ -640,30 +646,30 @@ class TelegramChatHandler():
                     content_type=mime
                 )
 
+                method = "sendDocument"
+                params = {
+                    "chat_id": self._chat,
+                    "_file": form_data,
+                    "caption": f"{sender}: ",
+                    "caption_entities": self._make_bold_entity(sender, 0)
+                }
+
+                if mime == "image/gif":
+                    method = "sendAnimation"
+                    params['animation'] = "attach://file"
+                elif mime.startswith("image"):
+                    method = "sendPhoto"
+                    params['photo'] = "attach://file"
+                elif mime.startswith("video"):
+                    method = "sendVideo"
+                    params['video'] = "attach://file"
+                elif mime.startswith("audio"):
+                    method = "sendAudio"
+                    params['audio'] = "attach://file"
+                else:
+                    params['document'] = "attach://file"
+
                 try:
-                    method = "sendDocument"
-                    params = {
-                        "chat_id": self._chat,
-                        "_file": form_data,
-                        "caption": f"{sender}: ",
-                        "caption_entities": self._make_bold_entity(sender, 0)
-                    }
-
-                    if mime == "image/gif":
-                        method = "sendAnimation"
-                        params['animation'] = "attach://file"
-                    elif mime.startswith("image"):
-                        method = "sendPhoto"
-                        params['photo'] = "attach://file"
-                    elif mime.startswith("video"):
-                        method = "sendVideo"
-                        params['video'] = "attach://file"
-                    elif mime.startswith("audio"):
-                        method = "sendAudio"
-                        params['audio'] = "attach://file"
-                    else:
-                        params['document'] = "attach://file"
-
                     message = await self._telegram.api_call(method, **params)
                     self._reply_map.add(url, message['message_id'])
                 except TelegramApiError:
@@ -1000,12 +1006,7 @@ def main():
         loop.set_exception_handler(exception_handler)
         loop.run_forever()
     except FileNotFoundError:
-        logger.error(
-            """Configuration file not found
-            Perhaps you forgot to rename config.ini.example?
-            Use the -c key to specify the full path to the config.
-            """
-        )
+        logger.error(CONFIG_FILE_NOT_FOUND)
     except configparser.NoOptionError:
         logger.exception("Missing mandatory option")
     except configparser.Error:
