@@ -641,43 +641,30 @@ class TelegramChatHandler():
                 )
 
                 try:
-                    message = None
-                    if mime == "image/gif":
-                        message = await self._telegram.api_call(
-                            "sendAnimation", chat_id=self._chat,
-                            animation="attach://file", _file=form_data,
-                            caption=f"{sender}: ",
-                            caption_entities=self._make_bold_entity(sender, 0)
-                        )
-                    elif mime.startswith("image"):
-                        message = await self._telegram.api_call(
-                            "sendPhoto", chat_id=self._chat,
-                            photo="attach://file", _file=form_data,
-                            caption=f"{sender}: ",
-                            caption_entities=self._make_bold_entity(sender, 0)
-                        )
-                    elif mime.startswith("video"):
-                        message = await self._telegram.api_call(
-                            "sendVideo", chat_id=self._chat,
-                            video="attach://file", _file=form_data,
-                            caption=f"{sender}: ",
-                            caption_entities=self._make_bold_entity(sender, 0)
-                        )
-                    elif mime.startswith("audio"):
-                        message = await self._telegram.api_call(
-                            "sendAudio", chat_id=self._chat,
-                            audio="attach://file", _file=form_data,
-                            caption=f"{sender}: ",
-                            caption_entities=self._make_bold_entity(sender, 0)
-                        )
-                    else:
-                        message = await self._telegram.api_call(
-                            "sendDocument", chat_id=self._chat,
-                            document="attach://file", _file=form_data,
-                            caption=f"{sender}: ",
-                            caption_entities=self._make_bold_entity(sender, 0)
-                        )
+                    method = "sendDocument"
+                    params = {
+                        "chat_id": self._chat,
+                        "_file": form_data,
+                        "caption": f"{sender}: ",
+                        "caption_entities": self._make_bold_entity(sender, 0)
+                    }
 
+                    if mime == "image/gif":
+                        method = "sendAnimation"
+                        params['animation'] = "attach://file"
+                    elif mime.startswith("image"):
+                        method = "sendPhoto"
+                        params['photo'] = "attach://file"
+                    elif mime.startswith("video"):
+                        method = "sendVideo"
+                        params['video'] = "attach://file"
+                    elif mime.startswith("audio"):
+                        method = "sendAudio"
+                        params['audio'] = "attach://file"
+                    else:
+                        params['document'] = "attach://file"
+
+                    message = await self._telegram.api_call(method, **params)
                     self._reply_map.add(url, message['message_id'])
                 except TelegramApiError:
                     await self._telegram.api_call(
