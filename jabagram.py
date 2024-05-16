@@ -495,7 +495,7 @@ class TelegramChatHandler():
         name: str = sender['first_name'] + (" " + last_name if last_name else "")
 
         message_id: int = message['message_id']
-        self._logger.info("Received message with id: ", message_id)
+        self._logger.info("Received message with id: %d", message_id)
 
         text = message.get("text") or message.get("caption")
         attachment = self._get_attachment(message)
