@@ -449,6 +449,46 @@ class TelegramChatHandler():
         self._reply_map = MessageMap(MESSAGE_MAP_SIZE)
         self._logger.info("New TelegramChatHandler created")
 
+
+    def _get_attachment(self, message: dict):
+        sender: dict = message['from']
+        last_name: str | None = sender.get("last_name")
+        name: str = sender['first_name'] + (" " + last_name if last_name else "")
+
+        attachment = message.get("photo") or message.get("document") \
+            or message.get("video") or message.get("audio") \
+            or message.get("voice") or message.get("video_note")
+
+        if not attachment:
+            return None
+
+        # Check for maximum available PhotoSize
+        if isinstance(attachment, list):
+            attachment = attachment[-1]
+
+        file_id = attachment.get("file_id")
+        file_unique_id = attachment.get("file_unique_id")
+        fname = attachment.get("file_name") or file_unique_id
+        mime = attachment.get("mime_type")
+        fsize = attachment.get("file_size")
+
+        if message.get("photo"):
+            # Telegram compresses all photos to JPEG
+            # if they were not sent as a document
+            mime = "image/jpeg"
+
+        if message.get("voice"):
+            fname = f"Voice message from {name}.ogg"
+        elif message.get("video_note"):
+            fname = f"Video from {name}.mp4"
+        else:
+            extension = mimetypes.guess_extension(mime)
+
+            if extension and not fname.endswith(extension):
+                fname += extension
+
+        return file_id, fname, mime, fsize
+
     async def process_message(self, message: dict) -> None:
         sender: dict = message['from']
         last_name: str | None = sender.get("last_name")
@@ -458,49 +498,24 @@ class TelegramChatHandler():
         self._logger.info("Received message with id: ", message_id)
 
         text = message.get("text") or message.get("caption")
-        attachment = message.get("photo") or message.get("document") \
-            or message.get("video") or message.get("audio") \
-            or message.get("voice") or message.get("video_note")
+        attachment = self._get_attachment(message)
         sticker = message.get("sticker")
 
         if attachment:
-            # Check for maximum available PhotoSize
-            if isinstance(attachment, list):
-                attachment = attachment[-1]
-
-            file_id = attachment.get("file_id")
-            file_unique_id = attachment.get("file_unique_id")
+            file_id, fname, mime, fsize = attachment
             file = await self._telegram.api_call("getFile", file_id=file_id)
             url = self._telegram.get_file_url(file["file_path"])
-
-            fname = attachment.get("file_name") or file_unique_id
-            mime = attachment.get("mime_type")
-
-            if message.get("photo"):
-                # Telegram compresses all photos to JPEG
-                # if they were not sent as a document
-                mime = "image/jpeg"
 
             if not mime:
                 async with aiohttp.ClientSession() as session:
                     async with session.head(url) as resp:
                         mime = resp.content_type
 
-            if message.get("voice"):
-                fname = f"Voice message from {name}.ogg"
-            elif message.get("video_note"):
-                fname = f"Video from {name}.mp4"
-            else:
-                extension = mimetypes.guess_extension(mime)
-
-                if extension:
-                    fname += extension
-
             await self._xmpp.send_attachment(
                 sender=name,
                 url=url,
                 fname=fname,
-                fsize=attachment.get("file_size"),
+                fsize=fsize,
                 mime=mime
             )
 
@@ -508,7 +523,13 @@ class TelegramChatHandler():
             reply = message.get("reply_to_message")
 
             if reply:
+                attachment = self._get_attachment(reply)
                 reply_body = reply.get("text") or reply.get("caption") or ""
+
+                if not reply_body and attachment:
+                    _, fname, _, _ = attachment
+                    reply_body = fname
+
                 reply_body = "> " + reply_body.replace("\n", "\n> ")
                 await self._xmpp.send_message(f"{reply_body}\n{text}",
                                               name, message_id)
@@ -520,7 +541,7 @@ class TelegramChatHandler():
             )
             self._reply_map.add(text, message_id)
 
-        if sticker:
+        elif sticker:
             file_id = sticker.get('file_id')
             file = await self._telegram.api_call("getFile", file_id=file_id)
             url = self._telegram.get_file_url(file['file_path'])
