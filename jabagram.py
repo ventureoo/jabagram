@@ -173,6 +173,7 @@ class XmppClient(ClientXMPP, metaclass=Singleton):
         self._data = data
         self._logger = logging.getLogger(self.__class__.__name__)
         self._key = key
+        self._reconnecting = False
 
         # Used XEPs
         self.register_plugin('xep_0030')
@@ -187,7 +188,20 @@ class XmppClient(ClientXMPP, metaclass=Singleton):
         # Common event handlers
         self.add_event_handler("session_start", self._session_start)
         self.add_event_handler('groupchat_direct_invite', self._invite_callback)
+        self.add_event_handler("disconnected", self._on_connection_reset)
+        self.add_event_handler("connected", self._on_connected)
 
+    async def _on_connected(self, _):
+        self._logger.info("Successfully connected.")
+
+    async def _on_connection_reset(self, event):
+        self._logger.warning("Connection reset: %d. Attempting to reconnect...", event)
+
+        # Wait for synchronous handlers
+        await asyncio.sleep(1)
+
+        self._reconnecting = True
+        self.connect()
 
     def _invite_callback(self, invite):
         muc = str(invite['groupchat_invite']['jid'])
@@ -212,8 +226,12 @@ class XmppClient(ClientXMPP, metaclass=Singleton):
         self._data.load_chats(self._add_chat)
 
     def _add_chat(self, chat: str, muc: str):
-        message_map = MessageMap(MESSAGE_MAP_SIZE)
+        # On reconnecting we need to rejoin the rooms
+        if self._reconnecting:
+            self.plugin['xep_0045'].join_muc(muc, BRIDGE_DEFAULT_NAME)
+            return
 
+        message_map = MessageMap(MESSAGE_MAP_SIZE)
         xmpp_handler = XmppRoomHandler(JID(muc), message_map)
         telegram_handler = TelegramChatHandler(int(chat), message_map)
 
@@ -440,6 +458,7 @@ class TelegramChatHandler():
             name += " " + last_name
 
         message_id: int = message['message_id']
+        self._logger.info("Received message with id: ", message_id)
 
         text = message.get("text") or message.get("caption")
         attachment = message.get("photo") or message.get("document") \
@@ -809,8 +828,6 @@ class XmppRoomHandler():
         sender = message['mucnick']
 
         if sender.endswith("(Telegram)") or sender == BRIDGE_DEFAULT_NAME:
-            self._logger.info("Recieved your own message")
-
             if self._current_telegram_message:
                 self._message_map.add(self._current_telegram_message, message['id'])
                 self._message_lock.release()
@@ -844,7 +861,11 @@ class XmppRoomHandler():
 
     async def send_message(self, text: str, sender: str, telegram_id: int):
         self._logger.info("Recieved message from telegram: %s", telegram_id)
-        await self._message_lock.acquire()
+
+        # Timeout 5 seconds to avoid deadlock if for some reason the message
+        # was not sent
+        await asyncio.wait_for(self._message_lock.acquire(), 5)
+
         await self._change_nick(sender)
         self._current_telegram_message = telegram_id
         self._xmpp.send_message(mto=self._muc, mbody=text, mtype='groupchat')
@@ -994,8 +1015,6 @@ def main():
         )
 
         loop = asyncio.get_event_loop()
-        loop.create_task(telegram.run())
-        xmpp.connect()
 
         def exception_handler(_, context):
             exception = context.get("exception")
@@ -1004,6 +1023,9 @@ def main():
                 logger.exception("Some unhandled error occured: %s", exception)
 
         loop.set_exception_handler(exception_handler)
+
+        loop.create_task(telegram.run())
+        xmpp.connect()
         loop.run_forever()
     except FileNotFoundError:
         logger.error(CONFIG_FILE_NOT_FOUND)
