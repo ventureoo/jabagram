@@ -451,11 +451,8 @@ class TelegramChatHandler():
 
     async def process_message(self, message: dict) -> None:
         sender: dict = message['from']
-        name: str = sender['first_name']
         last_name: str | None = sender.get("last_name")
-
-        if last_name:
-            name += " " + last_name
+        name: str = sender['first_name'] + (" " + last_name if last_name else "")
 
         message_id: int = message['message_id']
         self._logger.info("Received message with id: ", message_id)
@@ -560,12 +557,18 @@ class TelegramChatHandler():
 
         reply = edit.get("reply_to_message")
 
+        sender: dict = edit['from']
+        last_name: str | None = sender.get("last_name")
+        name: str = sender['first_name'] + (" " + last_name if last_name else "")
+
         if reply:
             reply_body = reply.get("text") or reply.get("caption") or ""
             reply_body = "> " + reply_body.replace("\n", "\n> ")
-            await self._xmpp.edit_message(stanza_id, f"{reply_body}\n{text}")
+            await self._xmpp.edit_message(
+                stanza_id, f"{reply_body}\n{text}", name
+            )
         else:
-            await self._xmpp.edit_message(stanza_id, text)
+            await self._xmpp.edit_message(stanza_id, text, name)
 
     def _make_bold_entity(self, text: str, offset: int):
         message_entities = [
@@ -748,11 +751,8 @@ class TelegramChatHandler():
 
 
     async def process_on_join(self, user: dict, event_id: int):
-        name: str = user["first_name"]
         last_name: str | None = user.get("last_name")
-
-        if last_name:
-            name += " " + last_name
+        name: str = user['first_name'] + (" " + last_name if last_name else "")
 
         await self._xmpp.send_message(
             f"*{name}* joined the chat", BRIDGE_DEFAULT_NAME, event_id
@@ -765,11 +765,8 @@ class TelegramChatHandler():
         )
 
     async def process_on_leave(self, user: dict, event_id: int):
-        name: str = user["first_name"]
         last_name: str | None = user.get("last_name")
-
-        if last_name:
-            name += " " + last_name
+        name: str = user['first_name'] + (" " + last_name if last_name else "")
 
         await self._xmpp.send_message(
             f"*{name}* left the chat", BRIDGE_DEFAULT_NAME, event_id
@@ -906,11 +903,12 @@ class XmppRoomHandler():
             self._nick_change_event.set()
 
 
-    async def edit_message(self, stanza_id: str, text: str):
+    async def edit_message(self, stanza_id: str, text: str, sender: str):
         self._logger.info("Editing the stanza: %s", stanza_id)
         message = self._xmpp.make_message(mbody=text, mto=self._muc,
                                           mtype='groupchat')
         message['replace']['id'] = stanza_id
+        await self._change_nick(sender)
         message.send()
 
     @lru_cache(maxsize=100)
