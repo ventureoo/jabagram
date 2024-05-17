@@ -195,7 +195,7 @@ class XmppClient(ClientXMPP, metaclass=Singleton):
         self._logger.info("Successfully connected.")
 
     async def _on_connection_reset(self, event):
-        self._logger.warning("Connection reset: %d. Attempting to reconnect...", event)
+        self._logger.warning("Connection reset: %s. Attempting to reconnect...", event)
 
         # Wait for synchronous handlers
         await asyncio.sleep(1)
@@ -493,9 +493,7 @@ class TelegramChatHandler():
         sender: dict = message['from']
         last_name: str | None = sender.get("last_name")
         name: str = sender['first_name'] + (" " + last_name if last_name else "")
-
         message_id: int = message['message_id']
-        self._logger.info("Received message with id: %d", message_id)
 
         text = message.get("text") or message.get("caption")
         attachment = self._get_attachment(message)
