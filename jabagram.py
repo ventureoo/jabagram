@@ -894,8 +894,8 @@ class XmppRoomHandler():
         upload_file = self._xmpp.plugin['xep_0363'].upload_file
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                try:
+            try:
+                async with session.get(url) as resp:
                     upload = await upload_file(
                         filename=fname,
                         size=fsize,
@@ -912,8 +912,10 @@ class XmppRoomHandler():
                                                       mtype='groupchat', mhtml=html)
                     message['oob']['url'] = upload
                     message.send()
-                except HTTPError as error:
-                    self._logger.error("Cannot upload file: %s", error)
+            except HTTPError as error:
+                self._logger.error("Cannot upload file: %s", error)
+            except ClientConnectionError as error:
+                self._logger.error("Cannot upload file: %s", error)
 
 
     def nick_change_handler(self, presence):
