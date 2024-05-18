@@ -724,7 +724,6 @@ class TelegramChatHandler():
     async def edit_message(self, stanza_id: str, text: str, sender: str):
         reply, body = self._parse_reply(text)
         telegram_id = self._message_map.get(stanza_id)
-        message = None
 
         if telegram_id is None:
             self._logger.debug(
@@ -732,37 +731,33 @@ class TelegramChatHandler():
             )
             return
 
-        self._logger.info("Found Telegram message %s matching XMPP stanza %s",
-                          telegram_id, stanza_id)
+        self._logger.info(
+            "Found Telegram message %s matching XMPP stanza %s",
+            telegram_id, stanza_id
+        )
 
-        try:
-            if not reply:
+        params = {
+            "chat_id": self._chat,
+            "text": f"{sender}: {text}",
+            "message_id": telegram_id,
+            "message_entities": self._make_bold_entity(sender, 0)
+        }
 
-                message = await self._telegram.api_call(
-                    "editMessageText", chat_id=self._chat,
-                    text=f"{sender}: {text}",
-                )
+        if reply:
+            # Be sure that replies to messages was sent as native in
+            # Telegram
+            if self._reply_map.get(reply):
+                params["text"] = f"{sender}: {body}"
             else:
-                if self._reply_map.get(reply):
-                    self._logger.debug(
-                        "Found reply to a message with ID %s in reply map", id
-                    )
-                    message = await self._telegram.api_call(
-                        "editMessageText", chat_id=self._chat,
-                        text=f"{sender}: {body}",
-                        message_id=telegram_id
-                    )
-                else:
-                    self._logger.debug(
-                        "Reply with body %s not found in the reply map", reply
-                    )
-                    formatted_reply = "> " + reply.replace("\n", "\n> ")
-                    message = await self._telegram.api_call(
-                        "editMessageText", chat_id=self._chat,
-                        text=f"{formatted_reply}\n{sender}: {body}",
-                        message_id=telegram_id
-                    )
-
+                formatted_reply = "> " + reply.replace("\n", "\n> ")
+                params["text"] = f"{formatted_reply}\n{sender}: {body}"
+                params["message_entities"] = self._make_bold_entity(
+                    sender, len(formatted_reply) + 1
+                )
+        try:
+            message = await self._telegram.api_call(
+                "editMessageText", **params
+            )
             self._reply_map.add(body, message['message_id'])
             self._message_map.add(stanza_id, message['message_id'])
         except TelegramApiError:
