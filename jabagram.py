@@ -636,34 +636,26 @@ class TelegramChatHandler():
 
     async def send_message(self, sender: str, text: str, stanza_id: str):
         reply, body = self._parse_reply(text)
-        message = None
+        params = {
+            "text": f"{sender}: {text}",
+            "chat_id": self._chat,
+            "entities": self._make_bold_entity(sender, 0)
+        }
+
+        if reply:
+            telegram_id = self._reply_map.get(reply)
+            if telegram_id:
+                params["text"] = f"{sender}: {body}"
+                params["reply_to_message_id"] = telegram_id
+            else:
+                formatted_reply = "> " + reply.replace("\n", "\n> ")
+                params["text"] = f"{formatted_reply}\n{sender}: {body}",
+                params["entities"] = self._make_bold_entity(
+                    sender, len(formatted_reply) + 1
+                )
 
         try:
-            if not reply:
-                message = await self._telegram.api_call(
-                    "sendMessage", chat_id=self._chat,
-                    text=f"{sender}: {text}",
-                    entities=self._make_bold_entity(sender, 0)
-                )
-            else:
-                telegram_id = self._reply_map.get(reply)
-
-                if telegram_id:
-                    message = await self._telegram.api_call(
-                        "sendMessage", chat_id=self._chat,
-                        text=f"{sender}: {body}",
-                        reply_to_message_id=telegram_id,
-                        entities=self._make_bold_entity(sender, 0)
-                    )
-                else:
-                    formatted_reply = "> " + reply.replace("\n", "\n> ")
-                    message = await self._telegram.api_call(
-                        "sendMessage", chat_id=self._chat,
-                        text=f"{formatted_reply}\n{sender}: {body}",
-                        entities=self._make_bold_entity(
-                            sender, len(formatted_reply) + 1
-                        )
-                    )
+            message = await self._telegram.api_call("sendMessage", **params)
             self._reply_map.add(body, message['message_id'])
             self._message_map.add(stanza_id, message['message_id'])
         except TelegramApiError:
@@ -740,7 +732,7 @@ class TelegramChatHandler():
             "chat_id": self._chat,
             "text": f"{sender}: {text}",
             "message_id": telegram_id,
-            "message_entities": self._make_bold_entity(sender, 0)
+            "entities": self._make_bold_entity(sender, 0)
         }
 
         if reply:
@@ -751,7 +743,7 @@ class TelegramChatHandler():
             else:
                 formatted_reply = "> " + reply.replace("\n", "\n> ")
                 params["text"] = f"{formatted_reply}\n{sender}: {body}"
-                params["message_entities"] = self._make_bold_entity(
+                params["entities"] = self._make_bold_entity(
                     sender, len(formatted_reply) + 1
                 )
         try:
