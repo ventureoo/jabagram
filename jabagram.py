@@ -150,7 +150,7 @@ class Database(metaclass=Singleton):
             with sqlite3.connect(self._db) as con:
                 cursor = con.cursor()
                 cursor.execute(
-                    "DELETE FROM chats WHERE telegram_id = ?", (str(chat_id))
+                    "DELETE FROM chats WHERE telegram_id = ?", (chat_id,)
                 )
         except sqlite3.Error as e:
             self._logger.error("Can not remove chats: %s", e)
@@ -418,7 +418,7 @@ class TelegramClient(metaclass=Singleton):
     def unbridge_chat(self, chat_id: int):
         del self._data.handlers[chat_id]
         self._logger.info("Unbridging chat with id %d", chat_id)
-        self._data.remove_chat(chat_id)
+        self._data.remove(chat_id)
 
     async def _bridge_command(self, chat_id, text):
         try:
