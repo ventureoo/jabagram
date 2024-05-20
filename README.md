@@ -48,9 +48,9 @@ MUC room, otherwise the bot will not accept the invitation. This is a security
 measure if you don't want your bridge instance to be used to bind other chats.
 Otherwise, leave this field blank.
 4) If you have done everything correctly, the bridge should start without
-errors or exceptions and will create a database ``jabagram.db``, which will
-store information about the "bound" chats in Telegram and XMPP. See Usage
-further below.
+errors or exceptions and will create a database ``jabagram.db`` inside data
+folder, which will store information about the "bound" chats in Telegram and XMPP.
+See Usage further below.
 
 An example of a config file that is given as ``config.example.ini``:
 
@@ -83,10 +83,7 @@ docker build -t jabagram .
 The following command is used to start it:
 
 ```
-# You need to create empty database beforehand, because if Docker tries to mount a non-existent file,
-# it will create it as a directory, which will be invalid.
-python -c '__import__("dbm").open("jabagram.db", "n")'
-docker run --restart always -d --name jabagram -v "$(pwd)/jabagram.db:/app/jabagram.db:rw" jabagram
+docker run --restart always -d --name jabagram -v "$(pwd)/data:/app/data:rw" jabagram
 ```
 
 Note about the ``-v`` key. It specifies that the database file be stored
@@ -115,7 +112,7 @@ existing one, you can perform chat binding using the following algorithm:
 
 If you want to "unbridge" chats, just kick the bot from your Telegram chat or
 XMPP room. It will automatically remove the entry from the database. Note that
-losing the ``jabagram.db`` file will unbridge all chats and you will need to
+losing the ``./data/jabagram.db`` file will unbridge all chats and you will need to
 re-bridge them.
 
 To re-bridge chats follow the steps above.
