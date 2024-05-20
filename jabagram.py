@@ -20,7 +20,7 @@ import argparse
 import asyncio
 import aiohttp
 import configparser
-import dbm
+import sqlite3
 import logging
 import mimetypes
 import stringprep
@@ -104,39 +104,56 @@ class Singleton(type):
         return cls._instances[cls]
 
 
-class ChatManager(metaclass=Singleton):
-    def __init__(self, fpath):
-        self._path = fpath
+class Database(metaclass=Singleton):
+    def __init__(self, db):
+        self._db = db
         self._logger = logging.getLogger(self.__class__.__name__)
         self._handlers = {}
         self._pending_rooms = {}
 
-    def add_chats_pair(self, chat, muc):
-        with dbm.open(self._path, "w") as database:
-            database[str(chat)] = str(muc)
-            database.sync()
-
-    def load_chats(self, callback):
+    def create(self):
         try:
-            with dbm.open(self._path, "c") as database:
-                chat_id = database.firstkey()
-                while chat_id is not None:
-                    muc = database.get(chat_id).decode()
-                    callback(chat_id, muc)
-                    chat_id = database.nextkey(chat_id)
-        except dbm.error:
-            self._logger.exception(
-                "Failed to load chats from database"
-            )
+            with sqlite3.connect(self._db) as con:
+                cursor = con.cursor()
+                cursor.execute("CREATE TABLE IF NOT EXISTS chats(telegram_id, muc)")
+                con.commit()
 
-    def remove_chat(self, chat_id: int):
+            return True
+        except sqlite3.Error as e:
+            self._logger.error("Can't initialize the database: %s", e)
+
+        return False
+
+
+    def add(self, chat, muc):
         try:
-            with dbm.open(self._path, "c") as database:
-                del database[str(chat_id)]
-        except dbm.error:
-            self._logger.exception(
-                "Failed to remove chat %d from database", chat_id
-            )
+            with sqlite3.connect(self._db) as con:
+                cursor = con.cursor()
+                cursor.execute("INSERT INTO chats(telegram_id, muc) VALUES (?, ?)", (chat, muc))
+                con.commit()
+        except sqlite3.Error as e:
+            self._logger.error("Can not add chats pair: %s", e)
+
+    def load(self, callback):
+        try:
+            with sqlite3.connect(self._db) as con:
+                cursor = con.cursor()
+                for row in cursor.execute("SELECT telegram_id,muc FROM chats"):
+                    telegram, muc = row
+                    callback(telegram, muc)
+
+        except sqlite3.Error as e:
+            self._logger.error("Can not add chats pair: %s", e)
+
+    def remove(self, chat_id: int):
+        try:
+            with sqlite3.connect(self._db) as con:
+                cursor = con.cursor()
+                cursor.execute(
+                    "DELETE FROM chats WHERE telegram_id = ?", (str(chat_id))
+                )
+        except sqlite3.Error as e:
+            self._logger.error("Can not remove chats: %s", e)
 
     @property
     def pending_rooms(self):
@@ -167,10 +184,10 @@ class MessageMap():
 
 
 class XmppClient(ClientXMPP, metaclass=Singleton):
-    def __init__(self, data: ChatManager, jid: str,
+    def __init__(self, database: Database, jid: str,
                  password: str, key: str):
         ClientXMPP.__init__(self, jid, password)
-        self._data = data
+        self._database = database
         self._logger = logging.getLogger(self.__class__.__name__)
         self._key = key
         self._reconnecting = False
@@ -207,7 +224,7 @@ class XmppClient(ClientXMPP, metaclass=Singleton):
         muc = str(invite['groupchat_invite']['jid'])
         reason = invite['groupchat_invite']['reason']
 
-        chat_id = self._data.pending_rooms.get(muc)
+        chat_id = self._database.pending_rooms.get(muc)
         if not chat_id:
             return
 
@@ -215,15 +232,15 @@ class XmppClient(ClientXMPP, metaclass=Singleton):
             self._logger.info("Wrong key was recieved: %s", reason)
             return
 
-        del self._data.pending_rooms[muc]
+        del self._database.pending_rooms[muc]
 
         self._add_chat(chat_id, muc)
-        self._data.add_chats_pair(chat_id, muc)
+        self._database.add(chat_id, muc)
 
     async def _session_start(self, _):
         await self.get_roster()
         self.send_presence()
-        self._data.load_chats(self._add_chat)
+        self._database.load(self._add_chat)
 
     def _add_chat(self, chat: str, muc: str):
         # On reconnecting we need to rejoin the rooms
@@ -243,7 +260,7 @@ class XmppClient(ClientXMPP, metaclass=Singleton):
         xmpp_handler.pair(telegram_handler)
         telegram_handler.pair_xmpp(xmpp_handler)
 
-        self._data.handlers[int(chat)] = telegram_handler
+        self._database.handlers[int(chat)] = telegram_handler
 
 
 class TelegramApiError(Exception):
@@ -1006,15 +1023,19 @@ def main():
         with open(args.config, "r", encoding="utf-8") as f:
             config.read_file(f)
 
-        database_service = ChatManager(args.data)
+        database = Database(args.data)
+
+        if not database.create():
+            logger.info("Error when working with the database, interrupt...")
+            return
 
         telegram = TelegramClient(
-            database_service,
+            database,
             config.get("telegram", "token"),
             config.get("xmpp", "login")
         )
         xmpp = XmppClient(
-            database_service,
+            database,
             config.get("xmpp", "login"),
             config.get("xmpp", "password"),
             config.get("general", "key")
