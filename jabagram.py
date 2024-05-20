@@ -21,6 +21,7 @@ import asyncio
 import aiohttp
 import configparser
 import sqlite3
+import os
 import logging
 import mimetypes
 import stringprep
@@ -105,8 +106,8 @@ class Singleton(type):
 
 
 class Database(metaclass=Singleton):
-    def __init__(self, db):
-        self._db = db
+    def __init__(self, path):
+        self._db = path + "/jabagram.db"
         self._logger = logging.getLogger(self.__class__.__name__)
         self._handlers = {}
         self._pending_rooms = {}
@@ -993,7 +994,7 @@ def main():
         dest="config", help="path to configuration file"
     )
     parser.add_argument(
-        '-d', '--data', default="jabagram.db",
+        '-d', '--data', default="data",
         dest="data", help="path to bridge database"
     )
     parser.add_argument(
@@ -1022,6 +1023,9 @@ def main():
 
         with open(args.config, "r", encoding="utf-8") as f:
             config.read_file(f)
+
+        if not path.exists(args.data):
+            os.mkdir(args.data)
 
         database = Database(args.data)
 
