@@ -909,7 +909,7 @@ class XmppRoomHandler():
                     )
                     html = (
                         f'<body xmlns="http://www.w3.org/1999/xhtml">'
-                        f'<a href="{url}">{url}</a></body>'
+                        f'<a href="{upload}">{upload}</a></body>'
                     )
                     self._logger.info(upload)
 
