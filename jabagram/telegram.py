@@ -16,6 +16,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import asyncio
 from json import dumps
 import logging
 import mimetypes
@@ -23,6 +24,7 @@ import mimetypes
 import aiohttp
 from slixmpp.jid import InvalidJID, JID
 
+from aiohttp import ClientConnectionError
 from .cache import Cache
 from .database import ChatService
 from .dispatcher import MessageDispatcher
@@ -67,14 +69,10 @@ class TelegramApiError(Exception):
         self.code = code
         self.desc = desc
 
-class TooManyRequestsError(TelegramApiError):
-    def __init__(self, code, desc, retry_after):
-        super().__init__(code, desc)
-        self.retry_after = retry_after
-
 class TelegramApi():
     def __init__(self, token):
         self.__token = token
+        self.__logger  = logging.getLogger(__class__.__name__)
 
     def __getattr__(self, method):
         async def wrapper(*file, **kwargs):
@@ -93,27 +91,36 @@ class TelegramApi():
                     "params": kwargs,
                     "data": file[0] if file else None
                 }
-                async with http_method(**params) as response:
-                    results = await response.json()
+                retry_attempts = 5
 
-                    if file and response.status != 200:
-                        raise TelegramApiError(
-                            response.status, "Failed to upload file"
+                while retry_attempts > 0:
+                    try:
+                        async with http_method(**params) as response:
+                            results = await response.json()
+
+                            if file and response.status != 200:
+                                raise TelegramApiError(
+                                    response.status, "Failed to upload file"
+                                )
+
+                            if not results.get("ok"):
+                                params = results.get("parameters")
+                                error_code = results['error_code']
+                                desc = results['description']
+
+                                if params and params.get("retry_after"):
+                                    await asyncio.sleep(params["retry_after"])
+                                    retry_attempts = retry_attempts - 1
+                                    continue
+
+                                raise TelegramApiError(error_code, desc)
+
+                            return results['result']
+                    except ClientConnectionError as error:
+                        self.__logger.error(
+                            "Failed to execute the request: %s", error
                         )
-
-                    if not results.get("ok"):
-                        params = results.get("parameters")
-                        error_code = results['error_code']
-                        desc = results['description']
-
-                        if params and params.get("retry_after"):
-                            raise TooManyRequestsError(
-                                error_code, desc, params["retry_after"]
-                            )
-
-                        raise TelegramApiError(error_code, desc)
-
-                    return results['result']
+                        retry_attempts = retry_attempts - 1
 
         return wrapper
 
