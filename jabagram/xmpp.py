@@ -78,6 +78,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.add_event_handler('groupchat_direct_invite', self.__invite_callback)
         self.add_event_handler("disconnected", self.__on_connection_reset)
         self.add_event_handler("connected", self.__on_connected)
+        self.__reconnecting = False
         self.__service.register_factory(self)
 
     async def start(self):
@@ -94,6 +95,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
     async def __on_connection_reset(self, event):
         self.__logger.warning("Connection reset: %s. Attempting to reconnect...", event)
+        self.__reconnecting = True
 
         # Wait for synchronous handlers
         await asyncio.sleep(1)
@@ -103,7 +105,9 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
     async def __session_start(self, _):
         await self.get_roster()
         self.send_presence()
-        self.__service.load_chats()
+
+        if not self.__reconnecting:
+            self.__service.load_chats()
 
     async def __on_connected(self, _):
         self.__logger.info("Successfully connected.")
