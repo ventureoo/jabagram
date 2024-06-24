@@ -395,7 +395,9 @@ class TelegramClient(ChatHandlerFactory):
             # if they were not sent as a document
             mime = "image/jpeg"
         elif attachment_type == "sticker":
-            fname = attachment.get("set_name") + " " + attachment.get("emoji")
+            fname = f"Sticker from {sender}"
+            if attachment.get("emoji"):
+                fname += " " + attachment["emoji"]
             if attachment.get("is_video"):
                 mime = "video/mp4"
                 fname += ".mp4"
