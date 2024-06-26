@@ -82,17 +82,16 @@ class TelegramApi():
             if method == "getUpdates":
                 timeout = aiohttp.client.ClientTimeout(total=0)
 
+            params = {
+                "url": url,
+                "timeout": timeout,
+                "params": kwargs,
+                "data": file[0] if file else None
+            }
+            retry_attempts = 5
 
             async with aiohttp.ClientSession() as session:
                 http_method = session.post if file else session.get
-                params = {
-                    "url": url,
-                    "timeout": timeout,
-                    "params": kwargs,
-                    "data": file[0] if file else None
-                }
-                retry_attempts = 5
-
                 while retry_attempts > 0:
                     try:
                         async with http_method(**params) as response:
@@ -394,6 +393,7 @@ class TelegramClient(ChatHandlerFactory):
             # Telegram compresses all photos to JPEG
             # if they were not sent as a document
             mime = "image/jpeg"
+            fname += ".jpg"
         elif attachment_type == "sticker":
             fname = f"Sticker from {sender}"
             if attachment.get("emoji"):
