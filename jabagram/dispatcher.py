@@ -28,6 +28,7 @@ from .model import (
     Event,
     Forwardable,
     Message,
+    Sticker,
     UnbridgeEvent,
 )
 
@@ -49,7 +50,9 @@ class MessageDispatcher():
             handler: ChatHandler | None = self.__chat_map.get(forwardable.address)
             self.__logger.debug("Received event: %s", forwardable)
             if handler:
-                if isinstance(forwardable, Attachment):
+                if isinstance(forwardable, Sticker):
+                    self.__loop.create_task(handler.send_sticker(forwardable))
+                elif isinstance(forwardable, Attachment):
                     self.__loop.create_task(handler.send_attachment(forwardable))
                 elif isinstance(forwardable, Message):
                     message: Message = cast(Message, forwardable)

@@ -22,9 +22,9 @@ import logging
 import mimetypes
 
 import aiohttp
+from aiohttp import ClientConnectionError
 from slixmpp.jid import InvalidJID, JID
 
-from aiohttp import ClientConnectionError
 from .cache import Cache
 from .database import ChatService
 from .dispatcher import MessageDispatcher
@@ -34,6 +34,7 @@ from .model import (
     ChatHandlerFactory,
     Event,
     Message,
+    Sticker,
     UnbridgeEvent,
 )
 
@@ -126,6 +127,10 @@ class TelegramApi():
                         )
                         retry_attempts = retry_attempts - 1
 
+                raise TelegramApiError(
+                    -1, "The number of retry attempts has been exhausted"
+                )
+
         return wrapper
 
 class TelegramChatHandler(ChatHandler):
@@ -177,11 +182,13 @@ class TelegramChatHandler(ChatHandler):
             self.__logger.error("Error sending a message: %s", error)
 
     async def send_attachment(self, attachment: Attachment) -> None:
+        url = await attachment.url_callback()
+
         async with aiohttp.ClientSession() as session:
-            async with session.get(attachment.content) as resp:
+            async with session.get(url) as resp:
                 if resp.status not in (200, 201):
                     self.__logger.error(
-                        "Error while getting %s file: %d", attachment.content, resp.status
+                        "Error while getting %s file: %d", url, resp.status
                     )
                     return
 
@@ -289,7 +296,12 @@ class TelegramClient(ChatHandlerFactory):
         )
         self.__service.register_factory(self)
 
-    def create_handler(self, address: str, muc: str, cache: Cache) -> None:
+    def create_handler(
+        self,
+        address: str,
+        muc: str,
+        cache: Cache,
+    ) -> None:
         handler = TelegramChatHandler(address, self.__api, cache)
         self.__disptacher.add_handler(muc, handler)
 
@@ -415,7 +427,8 @@ class TelegramClient(ChatHandlerFactory):
                 if extension and not fname.endswith(extension):
                     fname += extension
 
-        return file_id, fname, mime, fsize
+        return attachment_type, file_id, file_unique_id, fname, mime, fsize
+
 
     def __get_reply(self, sender: str, message: dict) -> str | None:
         reply: dict | None = message.get("reply_to_message")
@@ -424,7 +437,7 @@ class TelegramClient(ChatHandlerFactory):
             reply_body = reply.get("text") or reply.get("caption")
 
             if not reply_body and attachment:
-                _, fname, _, _ = attachment
+                _, _, _, fname, _, _ = attachment
                 reply_body = fname
 
             return reply_body
@@ -440,21 +453,35 @@ class TelegramClient(ChatHandlerFactory):
         attachment: tuple | None = self.__unpack_attachment(sender, raw_message)
 
         if attachment:
-            file_id, fname, mime, fsize = attachment
-            try:
-                file = await self.__api.getFile(file_id=file_id)
-                file_path = file['file_path']
-                url = f"https://api.telegram.org/file/bot{self.__token}/{file_path}"
+            attachment_type, file_id, file_unique_id, fname, mime, fsize = attachment
+
+            async def url_callback():
+                try:
+                    file = await self.__api.getFile(file_id=file_id)
+                    file_path = file['file_path']
+                    url = f"https://api.telegram.org/file/bot{self.__token}/{file_path}"
+                    return url
+                except TelegramApiError as error:
+                    self.__logger.error(
+                        "Failed to get url of attachment: %s", error
+                    )
+
+            if attachment_type == "sticker":
                 await self.__disptacher.send(
-                    Attachment(
-                       address=chat_id, event_id=message_id, sender=sender,
-                       content=url, fname=fname, mime=mime,
-                       fsize=fsize, edit=edit
+                    Sticker(
+                       address=chat_id, sender=sender, file_id=file_unique_id,
+                       fname=fname, mime=mime, fsize=fsize,
+                       url_callback=url_callback
                     )
                 )
-            except TelegramApiError as error:
-                self.__logger.error(
-                    "Failed to get url of attachment: %s", error)
+            else:
+                await self.__disptacher.send(
+                    Attachment(
+                       address=chat_id, sender=sender,
+                       fname=fname, mime=mime, fsize=fsize,
+                       url_callback=url_callback
+                    )
+                )
 
         if text:
             await self.__disptacher.send(

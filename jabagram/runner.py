@@ -22,6 +22,7 @@ import configparser
 import logging
 from os import path
 
+from .cache import StickerCache
 from .database import ChatService, Database
 from .dispatcher import MessageDispatcher
 from .telegram import TelegramClient
@@ -74,6 +75,7 @@ def main():
             config.read_file(f)
 
         database = Database(args.data)
+        sticker_cache = StickerCache(args.data)
 
         if not database.create():
             logger.error("Error when working with the database, interrupt...")
@@ -96,7 +98,8 @@ def main():
             config.get("xmpp", "login"),
             config.get("xmpp", "password"),
             service,
-            dispatcher
+            dispatcher,
+            sticker_cache
         )
         loop.create_task(telegram.start())
         loop.create_task(xmpp.start())

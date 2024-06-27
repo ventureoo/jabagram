@@ -15,9 +15,9 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
 from collections import OrderedDict
 import logging
+from sqlite3 import Error, connect
 
 class SimpleLRUCache():
     def __init__(self, size: int):
@@ -29,9 +29,8 @@ class SimpleLRUCache():
         if key in self.__map.keys():
             self.__map.move_to_end(key)
             return self.__map[key]
-        else:
-            self.__logger.debug("Not found key in cache: %s", key)
 
+        self.__logger.debug("Not found key in cache: %s", key)
         return None
 
     def add(self, key: str, value: str) -> None:
@@ -40,6 +39,40 @@ class SimpleLRUCache():
         self.__map.move_to_end(key)
         if len(self.__map) > self.__size:
             self.__map.popitem(last=False)
+
+class StickerCache():
+    def __init__(self, path):
+        self.__path = path
+        self.__logger = logging.getLogger(self.__class__.__name__)
+
+    def add(self, file_id, xmpp_url: str) -> None:
+        try:
+            with connect(self.__path) as con:
+                cursor = con.cursor()
+                cursor.execute(
+                    "INSERT INTO stickers(file_id, xmpp_url) VALUES (?, ?)",
+                    (file_id, xmpp_url)
+                )
+                con.commit()
+        except Error as e:
+            self.__logger.error("Can not add sticker: %s", e)
+
+    def get(self, file_id: str) -> str | None:
+        try:
+            with connect(self.__path) as con:
+                cursor = con.cursor()
+                cursor.execute(
+                    "SELECT xmpp_url FROM stickers WHERE file_id = ?", (file_id,)
+                )
+                row = cursor.fetchone()
+
+                if row:
+                    return row[0]
+
+                self.__logger.info("Cache miss for: %s", file_id)
+        except Error as e:
+            self.__logger.error("Can not get sticker: %s", e)
+
 
 class Cache():
     def __init__(self, capacity: int):

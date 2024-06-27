@@ -28,10 +28,10 @@ from slixmpp.clientxmpp import ClientXMPP
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
 
-from .cache import Cache
+from .cache import Cache, StickerCache
 from .database import ChatService
 from .dispatcher import MessageDispatcher
-from .model import Attachment, ChatHandler, ChatHandlerFactory, Event, Message
+from .model import Attachment, ChatHandler, ChatHandlerFactory, Event, Message, Sticker
 
 # XMPP does not support all available characters for resourcepart in JIDs, so
 # we need to filter a range of characters.
@@ -60,12 +60,14 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         jid: str,
         password: str,
         service: ChatService,
-        disptacher: MessageDispatcher
+        disptacher: MessageDispatcher,
+        sticker_cache: StickerCache
     ) -> None:
         ClientXMPP.__init__(self, jid, password)
         self.__service = service
         self.__logger = logging.getLogger(self.__class__.__name__)
         self.__dispatcher = disptacher
+        self.__sticker_cache = sticker_cache
 
         # Used XEPs
         xeps = ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
@@ -84,8 +86,13 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
     async def start(self):
         self.connect()
 
-    def create_handler(self, address: str, muc: str, cache: Cache) -> None:
-        handler = XmppRoomHandler(muc, self, cache)
+    def create_handler(
+            self,
+            address: str,
+            muc: str,
+            cache: Cache,
+    ) -> None:
+        handler = XmppRoomHandler(muc, self, cache, self.__sticker_cache)
         self.add_event_handler(
             f"muc::{muc}::got_online", handler.nick_change_handler
         )
@@ -132,11 +139,14 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
         if message['oob']['url']:
             url = message['oob']['url']
+
+            async def url_callback():
+                return url
+
             fname = url.split("/")[-1]
             attachment = Attachment(
-               address=muc, event_id=message_id, sender=sender,
-               content=url, fname=fname, mime=None,
-               fsize=None, edit=False
+               address=muc, sender=sender, url_callback=url_callback,
+               fname=fname, mime=None, fsize=None
             )
             await self.__dispatcher.send(attachment)
         else:
@@ -198,7 +208,12 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         return reply, body
 
 class XmppRoomHandler(ChatHandler):
-    def __init__(self, address: str, client: XmppClient, cache: Cache):
+    def __init__(self,
+        address: str,
+        client: XmppClient,
+        cache: Cache,
+        sticker_cache: StickerCache
+    ):
         super().__init__(address)
         self.__client = client
         self.__muc = JID(address)
@@ -206,6 +221,7 @@ class XmppRoomHandler(ChatHandler):
         self.__cache = cache
         self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
         self.__nick_change_event = asyncio.Event()
+        self.__sticker_cache = sticker_cache
 
 
     def nick_change_handler(self, presence):
@@ -231,6 +247,8 @@ class XmppRoomHandler(ChatHandler):
         await asyncio.wait_for(self.__nick_change_event.wait(), 15)
 
     async def send_message(self, message: Message) -> None:
+        self.__logger.info("Sending message with id: %s", message.event_id)
+
         params = {
             "mto": self.__muc,
             "mtype": "groupchat",
@@ -248,12 +266,19 @@ class XmppRoomHandler(ChatHandler):
         msg.send()
 
     async def send_attachment(self, attachment: Attachment) -> None:
+        url = await attachment.url_callback()
+
+        if not url:
+            return
+
+        self.__logger.info("Sending attachment with name: %s", attachment.fname)
+
         await self.__change_nick(attachment.sender)
         upload_file = self.__client.plugin['xep_0363'].upload_file
 
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.get(attachment.content) as resp:
+                async with session.get(url) as resp:
                     url = await upload_file(
                         filename=attachment.fname,
                         size=attachment.fsize or resp.length,
@@ -276,6 +301,53 @@ class XmppRoomHandler(ChatHandler):
                 self.__logger.error("Cannot upload file: %s", error)
             except ClientConnectionError as error:
                 self.__logger.error("Cannot upload file: %s", error)
+
+    async def send_sticker(self, sticker: Sticker) -> None:
+        self.__logger.info("Sending sticker with id: %s", sticker.file_id)
+        url = self.__sticker_cache.get(sticker.file_id)
+
+        if not url:
+            upload_file = self.__client.plugin['xep_0363'].upload_file
+            attachment_url = await sticker.url_callback()
+
+            if not attachment_url:
+                return
+
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.get(attachment_url) as resp:
+                        url = await upload_file(
+                            filename=sticker.fname,
+                            size=sticker.fsize or resp.length,
+                            content_type=sticker.mime or resp.content_type,
+                            input_file=resp.content
+                        )
+                        self.__sticker_cache.add(
+                            sticker.file_id, url
+                        )
+                except HTTPError as error:
+                    self.__logger.error("Cannot upload file: %s", error)
+                    return
+                except ClientConnectionError as error:
+                    self.__logger.error("Cannot upload file: %s", error)
+                    return
+        else:
+            self.__logger.info(
+                "Sticker %s was taken from the cache", sticker.file_id
+            )
+
+        html = (
+            f'<body xmlns="http://www.w3.org/1999/xhtml">'
+            f'<a href="{url}">{url}</a></body>'
+        )
+        message = self.__client.make_message(
+            mbody=url,
+            mto=self.__muc,
+            mtype='groupchat',
+            mhtml=html
+        )
+        message['oob']['url'] = url
+        message.send()
 
     async def edit_message(self, message: Message) -> None:
         stanza = self.__cache.message_ids.get(message.event_id)

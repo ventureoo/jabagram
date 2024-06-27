@@ -18,7 +18,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from .cache import Cache
 
@@ -43,10 +43,16 @@ class Message(Event):
     edit: Optional[bool] = False
 
 @dataclass(kw_only=True)
-class Attachment(Message):
+class Attachment(Forwardable):
+    sender: str
     fname: str
+    url_callback: Callable
     mime: Optional[str] = None
     fsize: Optional[int] = None
+
+@dataclass(kw_only=True)
+class Sticker(Attachment):
+    file_id: str
 
 
 class ChatHandler(ABC):
@@ -69,6 +75,9 @@ class ChatHandler(ABC):
     async def send_attachment(self, attachment: Attachment) -> None:
         pass
 
+    async def send_sticker(self, sticker: Sticker) -> None:
+        pass
+
     @abstractmethod
     async def unbridge(self) -> None:
         pass
@@ -83,6 +92,6 @@ class ChatHandlerFactory(ABC):
         self,
         address: str,
         muc: str,
-        cache: Cache
+        cache: Cache,
     ) -> None:
         pass

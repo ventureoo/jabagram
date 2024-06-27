@@ -18,7 +18,7 @@
 
 import logging
 import sqlite3
-from sqlite3 import connect, Error
+from sqlite3 import Error, connect
 from typing import Callable, Dict, List
 
 from .cache import Cache
@@ -36,6 +36,9 @@ class Database():
                 cursor.execute(
                     "CREATE TABLE IF NOT EXISTS chats(telegram_id, muc)"
                 )
+                cursor.execute(
+                    "CREATE TABLE IF NOT EXISTS stickers(file_id, xmpp_url)"
+                )
                 con.commit()
 
             return True
@@ -49,7 +52,8 @@ class Database():
             with connect(self.__path) as con:
                 cursor = con.cursor()
                 cursor.execute(
-                    "INSERT INTO chats(telegram_id, muc) VALUES (?, ?)", (chat, muc)
+                    "INSERT INTO chats(telegram_id, muc) VALUES (?, ?)",
+                    (chat, muc)
                 )
                 con.commit()
         except Error as e:
@@ -77,7 +81,11 @@ class Database():
             self.__logger.error("Can't remove chats: %s", e)
 
 class ChatService():
-    def __init__(self, database: Database, key: str):
+    def __init__(
+        self,
+        database: Database,
+        key: str
+    ) -> None:
         self.__database = database
         self.__pending_chats: Dict[str, str] = {}
         self.__factories: List[ChatHandlerFactory] = []
