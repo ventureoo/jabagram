@@ -354,7 +354,7 @@ class XmppRoomHandler(ChatHandler):
 
         if not stanza:
             self.__logger.info(
-                "Failed to found stanza for event: %d", message.event_id
+                "Failed to found stanza for event: %s", message.event_id
             )
             return
 

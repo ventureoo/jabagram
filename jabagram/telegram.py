@@ -84,7 +84,6 @@ class TelegramApi():
                 timeout = aiohttp.client.ClientTimeout(total=0)
 
             params = {
-                "url": url,
                 "timeout": timeout,
                 "params": kwargs,
                 "data": file[0] if file else None
@@ -95,7 +94,7 @@ class TelegramApi():
                 http_method = session.post if file else session.get
                 while retry_attempts > 0:
                     try:
-                        async with http_method(**params) as response:
+                        async with http_method(url, **params) as response:
                             results = await response.json()
 
                             if file and response.status != 200:
@@ -202,7 +201,6 @@ class TelegramChatHandler(ChatHandler):
                 method = self.__api.sendDocument
                 params = {
                     "chat_id": self.address,
-                    "_file": form_data,
                     "caption": f"{attachment.sender}: ",
                     "caption_entities": self.__make_bold_entity(attachment.sender, 0)
                 }
@@ -223,7 +221,7 @@ class TelegramChatHandler(ChatHandler):
                     params['document'] = "attach://file"
 
                 try:
-                    message = await method(**params)
+                    message = await method(form_data, **params)
                     self.__cache.reply_map.add(attachment.fname, message['message_id'])
                 except TelegramApiError:
                     await self.__api.sendMessage(
