@@ -118,15 +118,15 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.send_presence()
 
         if not self.__reconnecting:
-            self.__service.load_chats()
+            await self.__service.load_chats()
 
     async def __on_connected(self, _):
         self.__logger.info("Successfully connected.")
 
-    def __invite_callback(self, invite):
+    async def __invite_callback(self, invite):
         muc = str(invite['groupchat_invite']['jid'])
         key = invite['groupchat_invite']['reason']
-        self.__service.bind(muc, key)
+        await self.__service.bind(muc, key)
 
     async def __process_message(self, message):
         sender = message['mucnick']

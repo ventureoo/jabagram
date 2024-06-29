@@ -19,7 +19,7 @@
 import logging
 import sqlite3
 from sqlite3 import Error, connect
-from typing import Callable, Dict, List
+from typing import Dict, List
 
 from .cache import Cache
 from .model import ChatHandlerFactory
@@ -59,16 +59,18 @@ class Database():
         except Error as e:
             self.__logger.error("Can not add chats pair: %s", e)
 
-    def load(self, callback: Callable) -> None:
+    def get_chats(self) -> List:
+        res = []
         try:
             with sqlite3.connect(self.__path) as con:
                 cursor = con.cursor()
                 for row in cursor.execute("SELECT telegram_id,muc FROM chats"):
-                    telegram, muc = row
-                    callback(str(telegram), muc)
+                    res.append(row)
 
         except Error as e:
             self.__logger.error("Can't add chats pair: %s", e)
+
+        return res
 
     def remove(self, chat: str):
         try:
@@ -92,7 +94,7 @@ class ChatService():
         self.__key = key
         self.__logger = logging.getLogger(__class__.__name__)
 
-    def bind(self, muc: str, key: str) -> None:
+    async def bind(self, muc: str, key: str) -> None:
         telegram_id: str | None = self.__pending_chats.get(muc)
 
         if telegram_id is None:
@@ -105,23 +107,27 @@ class ChatService():
         self.__logger.info('New chat pair binded: %s - %s', muc, telegram_id)
         self.__database.add(telegram_id, muc)
         del self.__pending_chats[muc]
-        self.__spawn_handlers(telegram_id, muc)
+        await self.__spawn_handlers(telegram_id, muc)
 
-    def __spawn_handlers(self, telegram_id, muc):
+    async def __spawn_handlers(self, telegram_id, muc):
         cache = Cache(100)
         self.__logger.info(
             "Create handlers for chat %s and MUC: %s", telegram_id, muc
         )
         # Notify all factories to create chat message handlers
         for factory in self.__factories:
-            factory.create_handler(telegram_id, muc, cache)
+            await factory.create_handler(telegram_id, muc, cache)
 
     def register_factory(self, factory: ChatHandlerFactory) -> None:
         self.__factories.append(factory)
 
-    def load_chats(self) -> None:
+    async def load_chats(self) -> None:
         self.__logger.info("Loading chats from database...")
-        self.__database.load(self.__spawn_handlers)
+        chats = self.__database.get_chats()
+
+        for chat in chats:
+            telegram_id, muc = chat
+            await self.__spawn_handlers(str(telegram_id), muc)
 
     def pending(self, muc: str, chat: str) -> None:
         self.__logger.info(
