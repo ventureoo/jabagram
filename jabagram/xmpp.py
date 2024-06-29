@@ -86,7 +86,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
     async def start(self):
         self.connect()
 
-    def create_handler(
+    async def create_handler(
             self,
             address: str,
             muc: str,
@@ -96,7 +96,11 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.add_event_handler(
             f"muc::{muc}::got_online", handler.nick_change_handler
         )
-        self.plugin['xep_0045'].join_muc(JID(muc), BRIDGE_DEFAULT_NAME)
+        await self.plugin['xep_0045'].join_muc_wait(
+            JID(muc),
+            BRIDGE_DEFAULT_NAME,
+            maxstanzas=0
+        )
         self.__dispatcher.add_handler(address, handler)
 
 

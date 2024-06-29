@@ -88,7 +88,7 @@ class ChatHandler(ABC):
 
 class ChatHandlerFactory(ABC):
     @abstractmethod
-    def create_handler(
+    async def create_handler(
         self,
         address: str,
         muc: str,

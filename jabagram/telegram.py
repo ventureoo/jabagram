@@ -294,7 +294,7 @@ class TelegramClient(ChatHandlerFactory):
         )
         self.__service.register_factory(self)
 
-    def create_handler(
+    async def create_handler(
         self,
         address: str,
         muc: str,
