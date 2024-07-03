@@ -428,9 +428,10 @@ class TelegramClient(ChatHandlerFactory):
         return attachment_type, file_id, file_unique_id, fname, mime, fsize
 
 
-    def __get_reply(self, sender: str, message: dict) -> str | None:
+    def __get_reply(self, message: dict) -> str | None:
         reply: dict | None = message.get("reply_to_message")
         if reply:
+            sender: str = self.__get_full_name(reply['from'])
             attachment = self.__unpack_attachment(sender, reply)
             reply_body = reply.get("text") or reply.get("caption")
 
@@ -447,7 +448,7 @@ class TelegramClient(ChatHandlerFactory):
         sender: str = self.__get_full_name(raw_message['from'])
         message_id = str(raw_message['message_id'])
         text: str | None = raw_message.get("text") or raw_message.get("caption")
-        reply: str | None = self.__get_reply(sender, raw_message)
+        reply: str | None = self.__get_reply(raw_message)
         attachment: tuple | None = self.__unpack_attachment(sender, raw_message)
 
         if attachment:
