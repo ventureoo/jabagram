@@ -103,17 +103,17 @@ class TelegramApi():
                                 )
 
                             if not results.get("ok"):
-                                params = results.get("parameters")
+                                parameters = results.get("parameters")
                                 error_code = results['error_code']
                                 desc = results['description']
 
-                                if params and params.get("retry_after"):
-                                    await asyncio.sleep(params["retry_after"])
+                                if parameters and parameters.get("retry_after"):
+                                    await asyncio.sleep(parameters["retry_after"])
                                     retry_attempts = retry_attempts - 1
                                     self.__logger.warning(
                                         "Too many requests, " \
                                         "request will be executed again in: %d",
-                                        params['retry_after']
+                                        parameters['retry_after']
                                     )
                                     continue
 
