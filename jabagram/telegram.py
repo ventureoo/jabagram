@@ -194,7 +194,7 @@ class TelegramChatHandler(ChatHandler):
                 mime = resp.content_type
                 form_data = aiohttp.FormData()
                 form_data.add_field(
-                    'file', resp.content, filename=attachment.fname,
+                    'file', resp.content, filename=attachment.content,
                     content_type=mime
                 )
 
@@ -222,11 +222,11 @@ class TelegramChatHandler(ChatHandler):
 
                 try:
                     message = await method(form_data, **params)
-                    self.__cache.reply_map.add(attachment.fname, message['message_id'])
+                    self.__cache.reply_map.add(attachment.content, message['message_id'])
                 except TelegramApiError:
                     await self.__api.sendMessage(
                         chat_id=self.address,
-                        text=f"Couldn't transfer file {attachment.fname} from {attachment.sender}"
+                        text=f"Couldn't transfer file {attachment.content} from {attachment.sender}"
                     )
                     self.__logger.exception("Failed to send file to telegram")
 
@@ -468,16 +468,27 @@ class TelegramClient(ChatHandlerFactory):
             if attachment_type == "sticker":
                 await self.__disptacher.send(
                     Sticker(
-                       address=chat_id, sender=sender, file_id=file_unique_id,
-                       fname=fname, mime=mime, fsize=fsize,
+                       event_id=message_id,
+                       content=fname,
+                       address=chat_id,
+                       sender=sender,
+                       file_id=file_unique_id,
+                       mime=mime,
+                       fsize=fsize,
                        url_callback=url_callback
                     )
                 )
             else:
                 await self.__disptacher.send(
                     Attachment(
-                       address=chat_id, sender=sender,
-                       fname=fname, mime=mime, fsize=fsize,
+                       event_id=message_id,
+                       address=chat_id,
+                       sender=sender,
+                       content=fname,
+                       # if we have text, reply should be nested in the message below
+                       reply=None if text else reply,
+                       mime=mime,
+                       fsize=fsize,
                        url_callback=url_callback
                     )
                 )
@@ -485,9 +496,12 @@ class TelegramClient(ChatHandlerFactory):
         if text:
             await self.__disptacher.send(
                 Message(
-                    address=chat_id, event_id=message_id,
-                    content=text, sender=sender,
-                    reply=reply, edit=edit
+                    event_id=message_id,
+                    address=chat_id,
+                    content=text,
+                    sender=sender,
+                    reply=reply,
+                    edit=edit
                 )
             )
 

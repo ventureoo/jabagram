@@ -149,8 +149,13 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
             fname = url.split("/")[-1]
             attachment = Attachment(
-               address=muc, sender=sender, url_callback=url_callback,
-               fname=fname, mime=None, fsize=None
+               event_id=message_id,
+               address=muc,
+               sender=sender,
+               url_callback=url_callback,
+               content=fname,
+               mime=None,
+               fsize=None
             )
             await self.__dispatcher.send(attachment)
         else:
@@ -275,16 +280,27 @@ class XmppRoomHandler(ChatHandler):
         if not url:
             return
 
-        self.__logger.info("Sending attachment with name: %s", attachment.fname)
+        self.__logger.info(
+            "Sending attachment with name: %s", attachment.content
+        )
 
         await self.__change_nick(attachment.sender)
+
+        if attachment.reply:
+            reply_body = "> " + attachment.reply.replace("\n", "\n> ")
+            self.__client.send_message(
+                mto=self.__muc,
+                mbody=reply_body,
+                mtype="groupchat"
+            )
+
         upload_file = self.__client.plugin['xep_0363'].upload_file
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(url) as resp:
                     url = await upload_file(
-                        filename=attachment.fname,
+                        filename=attachment.content,
                         size=attachment.fsize or resp.length,
                         content_type=attachment.mime or resp.content_type,
                         input_file=resp.content
@@ -321,7 +337,7 @@ class XmppRoomHandler(ChatHandler):
                 try:
                     async with session.get(attachment_url) as resp:
                         url = await upload_file(
-                            filename=sticker.fname,
+                            filename=sticker.content,
                             size=sticker.fsize or resp.length,
                             content_type=sticker.mime or resp.content_type,
                             input_file=resp.content

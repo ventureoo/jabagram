@@ -43,9 +43,7 @@ class Message(Event):
     edit: Optional[bool] = False
 
 @dataclass(kw_only=True)
-class Attachment(Forwardable):
-    sender: str
-    fname: str
+class Attachment(Message):
     url_callback: Callable
     mime: Optional[str] = None
     fsize: Optional[int] = None
