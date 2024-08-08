@@ -25,6 +25,7 @@ import stringprep
 import aiohttp
 from aiohttp import ClientConnectionError
 from slixmpp.clientxmpp import ClientXMPP
+from slixmpp.exceptions import IqTimeout
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
 
@@ -320,6 +321,8 @@ class XmppRoomHandler(ChatHandler):
             except HTTPError as error:
                 self.__logger.error("Cannot upload file: %s", error)
             except ClientConnectionError as error:
+                self.__logger.error("Cannot upload file: %s", error)
+            except IqTimeout as error:
                 self.__logger.error("Cannot upload file: %s", error)
 
     async def send_sticker(self, sticker: Sticker) -> None:
