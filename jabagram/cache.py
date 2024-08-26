@@ -50,7 +50,7 @@ class StickerCache():
             with connect(self.__path) as con:
                 cursor = con.cursor()
                 cursor.execute(
-                    "INSERT INTO stickers(file_id, xmpp_url) VALUES (?, ?)",
+                    "INSERT INTO stickers(file_id, xmpp_url) VALUES (?, ?) ON CONFLICT (file_id) DO UPDATE SET xmpp_url = excluded.xmpp_url",
                     (file_id, xmpp_url)
                 )
                 con.commit()

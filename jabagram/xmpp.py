@@ -329,6 +329,21 @@ class XmppRoomHandler(ChatHandler):
         self.__logger.info("Sending sticker with id: %s", sticker.file_id)
         url = self.__sticker_cache.get(sticker.file_id)
 
+        if url:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.head(url) as resp:
+                        if resp.status == 404:
+                            # Reupload file if XMPP server deleted it after
+                            # some time.
+                            url = None
+                            self.__logger.info(
+                                "Cache miss for a file: %s", sticker.file_id
+                            )
+            except ClientConnectionError as error:
+                self.__logger.error("Cannot do head request for file: %s", error)
+                return
+
         if not url:
             upload_file = self.__client.plugin['xep_0363'].upload_file
             attachment_url = await sticker.url_callback()

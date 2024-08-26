@@ -37,7 +37,7 @@ class Database():
                     "CREATE TABLE IF NOT EXISTS chats(telegram_id, muc)"
                 )
                 cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS stickers(file_id, xmpp_url)"
+                    "CREATE TABLE IF NOT EXISTS stickers(file_id PRIMARY KEY, xmpp_url NOT NULL)"
                 )
                 con.commit()
 
