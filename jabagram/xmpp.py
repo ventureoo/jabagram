@@ -110,7 +110,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.__reconnecting = True
 
         # Wait for synchronous handlers
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
         self.connect()
 
