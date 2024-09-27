@@ -69,7 +69,7 @@ def main():
     logger = logging.Logger("Runner")
 
     try:
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)
 
         with open(args.config, "r", encoding="utf-8") as f:
             config.read_file(f)
