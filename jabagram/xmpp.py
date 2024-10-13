@@ -53,6 +53,7 @@ BRIDGE_DEFAULT_NAME = "Telegram Bridge"
 UNBRIDGE_XMPP_MESSAGE = """
 This chat was automatically unbridged due to a bot kick in Telegram.
 """
+XMPP_OCCUPANT_ERROR = "Only occupants are allowed to send messages to the conference"
 
 
 class XmppClient(ClientXMPP, ChatHandlerFactory):
@@ -78,6 +79,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         # Common event handlers
         self.add_event_handler("session_start", self.__session_start)
         self.add_event_handler("groupchat_message", self.__process_message)
+        self.add_event_handler("groupchat_message_error", self.__process_errors)
         self.add_event_handler('groupchat_direct_invite', self.__invite_callback)
         self.add_event_handler("disconnected", self.__on_connection_reset)
         self.add_event_handler("connected", self.__on_connected)
@@ -128,6 +130,16 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         muc = str(invite['groupchat_invite']['jid'])
         key = invite['groupchat_invite']['reason']
         await self.__service.bind(muc, key)
+
+    async def __process_errors(self, message):
+        room = message['from'].bare
+        if message['error']['text'] == XMPP_OCCUPANT_ERROR \
+                and self.__dispatcher.is_chat_bound(room):
+            await self.plugin['xep_0045'].join_muc_wait(
+                message['from'],
+                BRIDGE_DEFAULT_NAME,
+                maxstanzas=0
+            )
 
     async def __process_message(self, message):
         sender = message['mucnick']
