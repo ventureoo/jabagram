@@ -24,6 +24,7 @@ import stringprep
 
 import aiohttp
 from aiohttp import ClientConnectionError
+from jabagram.messages import Messages
 from slixmpp.clientxmpp import ClientXMPP
 from slixmpp.exceptions import IqTimeout
 from slixmpp.jid import JID
@@ -50,9 +51,6 @@ BLACKLIST_USERNAME_CHARS = (
     stringprep.in_table_c9
 )
 BRIDGE_DEFAULT_NAME = "Telegram Bridge"
-UNBRIDGE_XMPP_MESSAGE = """
-This chat was automatically unbridged due to a bot kick in Telegram.
-"""
 XMPP_OCCUPANT_ERROR = "Only occupants are allowed to send messages to the conference"
 
 
@@ -63,7 +61,8 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         password: str,
         service: ChatService,
         disptacher: MessageDispatcher,
-        sticker_cache: StickerCache
+        sticker_cache: StickerCache,
+        messages: Messages
     ) -> None:
         ClientXMPP.__init__(self, jid, password)
         self.__service = service
@@ -85,6 +84,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.add_event_handler("connected", self.__on_connected)
         self.__reconnecting = False
         self.__service.register_factory(self)
+        self.__messages = messages
 
     async def start(self):
         self.connect()
@@ -95,7 +95,13 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             muc: str,
             cache: Cache,
     ) -> None:
-        handler = XmppRoomHandler(muc, self, cache, self.__sticker_cache)
+        handler = XmppRoomHandler(
+            muc,
+            self,
+            cache,
+            self.__sticker_cache,
+            self.__messages
+        )
         self.add_event_handler(
             f"muc::{muc}::got_online", handler.nick_change_handler
         )
@@ -234,7 +240,8 @@ class XmppRoomHandler(ChatHandler):
         address: str,
         client: XmppClient,
         cache: Cache,
-        sticker_cache: StickerCache
+        sticker_cache: StickerCache,
+        messages: Messages
     ):
         super().__init__(address)
         self.__client = client
@@ -244,6 +251,7 @@ class XmppRoomHandler(ChatHandler):
         self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
         self.__nick_change_event = asyncio.Event()
         self.__sticker_cache = sticker_cache
+        self.__messages = messages
 
 
     def nick_change_handler(self, presence):
@@ -433,7 +441,8 @@ class XmppRoomHandler(ChatHandler):
 
     async def unbridge(self) -> None:
         self.__client.send_message(
-            mto=self.__muc, mbody=UNBRIDGE_XMPP_MESSAGE,
+            mto=self.__muc,
+            mbody=self.__messages.unbridge_xmpp(),
             mtype="groupchat"
         )
         self.__client.plugin['xep_0045'].leave_muc(

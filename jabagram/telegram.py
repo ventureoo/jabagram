@@ -23,6 +23,7 @@ import mimetypes
 
 import aiohttp
 from aiohttp import ClientConnectionError
+from jabagram.messages import Messages
 from slixmpp.jid import InvalidJID, JID
 
 from .cache import Cache
@@ -37,32 +38,6 @@ from .model import (
     Sticker,
     UnbridgeEvent,
 )
-
-QUEUEING_MESSAGE = """
-Specified room has been successfully placed on the queue.
-Please invite this {} bot to your XMPP room, and as the
-reason for the invitation specify the secret key that is
-specified in bot's config or ask the owner of this bridge
-instance for it.
-
-If you have specified an incorrect room address, simply repeat
-the pair command (/jabagram) with the corrected address.
-"""
-
-INVALID_JID_MESSAGE = """
-You have specified an incorrect room JID. Please try again.
-"""
-
-UNBRIDGE_TELEGRAM_MESSAGE = """
-This chat was automatically unbridged due to a bot kick in XMPP.
-If you want to bridge it again, invite this bot to this chat again
-and use the /jabagram command.
-"""
-
-MISSING_MUC_JID_MESSAGE = """
-Please specify the MUC address of room you want to pair with
-this Telegram chat.
-"""
 
 class TelegramApiError(Exception):
     def __init__(self, code, desc):
@@ -137,12 +112,14 @@ class TelegramChatHandler(ChatHandler):
         self,
         address: str,
         api: TelegramApi,
-        cache: Cache
+        cache: Cache,
+        messages: Messages
     ) -> None:
         super().__init__(address)
         self.__cache = cache
         self.__logger = logging.getLogger(f"TelegramChatHandler ({address})")
         self.__api = api
+        self.__messages = messages
 
     def __make_bold_entity(self, text: str, offset: int):
         message_entities = [
@@ -270,7 +247,8 @@ class TelegramChatHandler(ChatHandler):
 
     async def unbridge(self) -> None:
         await self.__api.sendMessage(
-            chat_id=self.address, text=UNBRIDGE_TELEGRAM_MESSAGE
+            chat_id=self.address,
+            text=self.__messages.unbridge_telegram()
         )
         await self.__api.leaveChat(chat_id=self.address)
 
@@ -280,7 +258,8 @@ class TelegramClient(ChatHandlerFactory):
         token: str,
         jid: str,
         service: ChatService,
-        dispatcher: MessageDispatcher
+        dispatcher: MessageDispatcher,
+        messages: Messages
     ) -> None:
         self.__api: TelegramApi = TelegramApi(token)
         self.__token: str = token
@@ -293,6 +272,7 @@ class TelegramClient(ChatHandlerFactory):
              "video_note", "document", "audio"
         )
         self.__service.register_factory(self)
+        self.__messages = messages
 
     async def create_handler(
         self,
@@ -300,7 +280,12 @@ class TelegramClient(ChatHandlerFactory):
         muc: str,
         cache: Cache,
     ) -> None:
-        handler = TelegramChatHandler(address, self.__api, cache)
+        handler = TelegramChatHandler(
+            address,
+            self.__api,
+            cache,
+            self.__messages
+        )
         self.__disptacher.add_handler(muc, handler)
 
     def __filter_update(self, update: dict):
@@ -363,19 +348,19 @@ class TelegramClient(ChatHandlerFactory):
 
             await self.__api.sendMessage(
                 chat_id=chat_id,
-                text=QUEUEING_MESSAGE.format(self.__jid)
+                text=self.__messages.queueing_message().format(self.__jid)
             )
         except IndexError:
             await self.__api.sendMessage(
                 chat_id=chat_id,
-                text=MISSING_MUC_JID_MESSAGE
+                text=self.__messages.missing_muc_jid()
             )
         except TelegramApiError as err:
             self.__logger.exception(err)
         except InvalidJID:
             await self.__api.sendMessage(
                 "sendMessage", chat_id=chat_id,
-                text=INVALID_JID_MESSAGE
+                text=self.__messages.invalid_jid()
             )
 
     def __unpack_attachment(self, sender: str, message: dict) -> tuple | None:

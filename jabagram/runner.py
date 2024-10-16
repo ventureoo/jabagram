@@ -22,6 +22,8 @@ import configparser
 import logging
 from os import path
 
+from jabagram.messages import Messages
+
 from .cache import StickerCache
 from .database import ChatService, Database
 from .dispatcher import MessageDispatcher
@@ -33,6 +35,7 @@ Configuration file not found.
 Perhaps you forgot to rename config.ini.example?
 Use the -c key to specify the full path to the config.
 """
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -70,10 +73,12 @@ def main():
 
     try:
         config = configparser.ConfigParser(interpolation=None)
+        messages = Messages(config)
 
         with open(args.config, "r", encoding="utf-8") as f:
             config.read_file(f)
 
+        messages.load()
         database = Database(args.data)
         sticker_cache = StickerCache(args.data)
 
@@ -92,14 +97,16 @@ def main():
             config.get("telegram", "token"),
             config.get("xmpp", "login"),
             service,
-            dispatcher
+            dispatcher,
+            messages
         )
         xmpp = XmppClient(
             config.get("xmpp", "login"),
             config.get("xmpp", "password"),
             service,
             dispatcher,
-            sticker_cache
+            sticker_cache,
+            messages
         )
         loop.create_task(telegram.start())
         loop.create_task(xmpp.start())
