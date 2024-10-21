@@ -21,6 +21,9 @@ from datetime import datetime
 from functools import lru_cache
 import logging
 import stringprep
+import unicodedata
+import re
+from unidecode import unidecode
 
 import aiohttp
 from aiohttp import ClientConnectionError
@@ -52,6 +55,7 @@ BLACKLIST_USERNAME_CHARS = (
 )
 BRIDGE_DEFAULT_NAME = "Telegram Bridge"
 XMPP_OCCUPANT_ERROR = "Only occupants are allowed to send messages to the conference"
+RTL_CHAR_PATTERN = re.compile(r'[\u0590-\u05FF\u0600-\u06FF]')
 
 
 class XmppClient(ClientXMPP, ChatHandlerFactory):
@@ -485,6 +489,8 @@ class XmppRoomHandler(ChatHandler):
 
     @lru_cache(maxsize=100)
     def __validate_name(self, sender: str) -> str:
+        if RTL_CHAR_PATTERN.search(sender):
+            sender = unidecode(sender)
         valid = []
         for char in sender:
             for check in BLACKLIST_USERNAME_CHARS:
