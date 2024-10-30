@@ -81,11 +81,11 @@ class Messages():
 
     @property
     def missing_muc_jid(self) -> str:
-        return self.__messages["missing_muc_jid"]
+        return self.__messages["messages.missing_muc_jid"]
 
     @property
     def queueing_message(self) -> str:
-        return self.__messages["queueing_message"]
+        return self.__messages["messages.queueing_message"]
 
     @property
     def invalid_jid(self) -> str:

@@ -442,7 +442,7 @@ class XmppRoomHandler(ChatHandler):
     async def unbridge(self) -> None:
         self.__client.send_message(
             mto=self.__muc,
-            mbody=self.__messages.unbridge_xmpp(),
+            mbody=self.__messages.unbridge_xmpp,
             mtype="groupchat"
         )
         self.__client.plugin['xep_0045'].leave_muc(

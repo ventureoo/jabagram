@@ -70,12 +70,12 @@ class TelegramApi():
                 while retry_attempts > 0:
                     try:
                         async with http_method(url, **params) as response:
-                            results = await response.json()
-
                             if file and response.status != 200:
                                 raise TelegramApiError(
                                     response.status, "Failed to upload file"
                                 )
+
+                            results = await response.json()
 
                             if not results.get("ok"):
                                 parameters = results.get("parameters")
@@ -83,13 +83,13 @@ class TelegramApi():
                                 desc = results['description']
 
                                 if parameters and parameters.get("retry_after"):
-                                    await asyncio.sleep(parameters["retry_after"])
-                                    retry_attempts = retry_attempts - 1
                                     self.__logger.warning(
                                         "Too many requests, " \
                                         "request will be executed again in: %d",
                                         parameters['retry_after']
                                     )
+                                    await asyncio.sleep(parameters["retry_after"])
+                                    retry_attempts = retry_attempts - 1
                                     continue
 
                                 raise TelegramApiError(error_code, desc)
@@ -248,7 +248,7 @@ class TelegramChatHandler(ChatHandler):
     async def unbridge(self) -> None:
         await self.__api.sendMessage(
             chat_id=self.address,
-            text=self.__messages.unbridge_telegram()
+            text=self.__messages.unbridge_telegram
         )
         await self.__api.leaveChat(chat_id=self.address)
 
@@ -334,7 +334,7 @@ class TelegramClient(ChatHandlerFactory):
                     if self.__filter_update(member):
                         await self.__process_kick_event(member)
 
-                params["offset"] = updates[len(updates) - 1]['update_id'] + 1
+            params["offset"] = updates[len(updates) - 1]['update_id'] + 1
 
 
     async def __bridge_command(self, chat_id: str, cmd: str):
@@ -348,19 +348,19 @@ class TelegramClient(ChatHandlerFactory):
 
             await self.__api.sendMessage(
                 chat_id=chat_id,
-                text=self.__messages.queueing_message().format(self.__jid)
+                text=self.__messages.queueing_message.format(self.__jid)
             )
         except IndexError:
             await self.__api.sendMessage(
                 chat_id=chat_id,
-                text=self.__messages.missing_muc_jid()
+                text=self.__messages.missing_muc_jid
             )
         except TelegramApiError as err:
             self.__logger.exception(err)
         except InvalidJID:
             await self.__api.sendMessage(
                 "sendMessage", chat_id=chat_id,
-                text=self.__messages.invalid_jid()
+                text=self.__messages.invalid_jid
             )
 
     def __unpack_attachment(self, sender: str, message: dict) -> tuple | None:
