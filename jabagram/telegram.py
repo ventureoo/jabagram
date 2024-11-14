@@ -36,6 +36,7 @@ from .model import (
     Event,
     Message,
     Sticker,
+    TelegramAttachment,
     UnbridgeEvent,
 )
 
@@ -384,7 +385,11 @@ class TelegramClient(ChatHandlerFactory):
                 "Error processing the bridge command: %s", error
             )
 
-    def __unpack_attachment(self, sender: str, message: dict) -> tuple | None:
+    def __extract_attachment(
+            self,
+            sender: str,
+            message: dict
+    ) -> TelegramAttachment | None:
         attachment = None
         attachment_type = None
         for name in self.__supported_attachment_types:
@@ -431,18 +436,25 @@ class TelegramClient(ChatHandlerFactory):
                 if extension and not fname.endswith(extension):
                     fname += extension
 
-        return attachment_type, file_id, file_unique_id, fname, mime, fsize
+        telegram_attachment = TelegramAttachment(
+            attachment_type=attachment_type,
+            file_id=file_id,
+            file_unique_id=file_unique_id,
+            fname=fname,
+            mime=mime,
+            fsize=fsize
+        )
+        return telegram_attachment
 
     def __get_reply(self, message: dict) -> str | None:
         reply: dict | None = message.get("reply_to_message")
         if reply:
             sender: str = self.__get_full_name(reply['from'])
-            attachment = self.__unpack_attachment(sender, reply)
+            attachment = self.__extract_attachment(sender, reply)
             reply_body = reply.get("text") or reply.get("caption")
 
             if not reply_body and attachment:
-                _, _, _, fname, _, _ = attachment
-                reply_body = fname
+                reply_body = attachment.fname
 
             return reply_body
 
@@ -455,15 +467,14 @@ class TelegramClient(ChatHandlerFactory):
         text: str | None = raw_message.get(
             "text") or raw_message.get("caption")
         reply: str | None = self.__get_reply(raw_message)
-        attachment: tuple | None = self.__unpack_attachment(
-            sender, raw_message)
+        attachment: TelegramAttachment | None = self.__extract_attachment(
+            sender, raw_message
+        )
 
         if attachment:
-            attachment_type, file_id, file_unique_id, fname, mime, fsize = attachment
-
             async def url_callback():
                 try:
-                    file = await self.__api.getFile(file_id=file_id)
+                    file = await self.__api.getFile(file_id=attachment.file_id)
                     file_path = file['file_path']
                     url = f"https://api.telegram.org/file/bot{
                         self.__token}/{file_path}"
@@ -473,16 +484,16 @@ class TelegramClient(ChatHandlerFactory):
                         "Failed to get url of attachment: %s", error
                     )
 
-            if attachment_type == "sticker":
+            if attachment.attachment_type == "sticker":
                 await self.__disptacher.send(
                     Sticker(
                         event_id=message_id,
-                        content=fname,
+                        content=attachment.fname,
                         address=chat_id,
                         sender=sender,
-                        file_id=file_unique_id,
-                        mime=mime,
-                        fsize=fsize,
+                        file_id=attachment.file_unique_id,
+                        mime=attachment.mime,
+                        fsize=attachment.fsize,
                         url_callback=url_callback
                     )
                 )
@@ -492,12 +503,12 @@ class TelegramClient(ChatHandlerFactory):
                         event_id=message_id,
                         address=chat_id,
                         sender=sender,
-                        content=fname,
+                        content=attachment.fname,
                         # if we have text, reply should be nested
                         # in the message below
                         reply=None if text else reply,
-                        mime=mime,
-                        fsize=fsize,
+                        mime=attachment.mime,
+                        fsize=attachment.fsize,
                         url_callback=url_callback
                     )
                 )

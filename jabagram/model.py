@@ -49,6 +49,15 @@ class Attachment(Message):
     fsize: Optional[int] = None
 
 @dataclass(kw_only=True)
+class TelegramAttachment():
+    attachment_type: str
+    file_id: str
+    file_unique_id: str
+    fname: str
+    mime: Optional[str] = None
+    fsize: Optional[int] = None
+
+@dataclass(kw_only=True)
 class Sticker(Attachment):
     file_id: str
 
