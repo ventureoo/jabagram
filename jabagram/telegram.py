@@ -39,16 +39,18 @@ from .model import (
     UnbridgeEvent,
 )
 
+
 class TelegramApiError(Exception):
     def __init__(self, code, desc):
         super().__init__(f"Telegram API error ({code}): {desc}")
         self.code = code
         self.desc = desc
 
+
 class TelegramApi():
     def __init__(self, token):
         self.__token = token
-        self.__logger  = logging.getLogger(__class__.__name__)
+        self.__logger = logging.getLogger(__class__.__name__)
 
     def __getattr__(self, method):
         async def wrapper(*file, **kwargs):
@@ -82,13 +84,16 @@ class TelegramApi():
                                 error_code = results['error_code']
                                 desc = results['description']
 
-                                if parameters and parameters.get("retry_after"):
+                                if parameters and \
+                                        parameters.get("retry_after"):
                                     self.__logger.warning(
-                                        "Too many requests, " \
-                                        "request will be executed again in: %d",
+                                        "Too many requests, request"
+                                        "will be executed again in: %d",
                                         parameters['retry_after']
                                     )
-                                    await asyncio.sleep(parameters["retry_after"])
+                                    await asyncio.sleep(
+                                        parameters["retry_after"]
+                                    )
                                     retry_attempts = retry_attempts - 1
                                     continue
 
@@ -106,6 +111,7 @@ class TelegramApi():
                 )
 
         return wrapper
+
 
 class TelegramChatHandler(ChatHandler):
     def __init__(
@@ -145,7 +151,8 @@ class TelegramChatHandler(ChatHandler):
                 params["reply_to_message_id"] = telegram_id
             else:
                 formatted_reply = "> " + message.reply.replace("\n", "\n> ")
-                params["text"] = f"{formatted_reply}\n{message.sender}: {message.content}"
+                params["text"] = f"{formatted_reply}\n{
+                    message.sender}: {message.content}"
                 params["entities"] = self.__make_bold_entity(
                     message.sender, len(formatted_reply) + 1
                 )
@@ -153,7 +160,9 @@ class TelegramChatHandler(ChatHandler):
         try:
             response = await self.__api.sendMessage(**params)
             self.__cache.reply_map.add(message.content, response['message_id'])
-            self.__cache.message_ids.add(message.event_id, response['message_id'])
+            self.__cache.message_ids.add(
+                message.event_id, response['message_id']
+            )
         except TelegramApiError as error:
             self.__logger.error("Error sending a message: %s", error)
 
@@ -179,7 +188,9 @@ class TelegramChatHandler(ChatHandler):
                 params = {
                     "chat_id": self.address,
                     "caption": f"{attachment.sender}: ",
-                    "caption_entities": self.__make_bold_entity(attachment.sender, 0)
+                    "caption_entities": self.__make_bold_entity(
+                        attachment.sender, offset=0
+                    )
                 }
 
                 if mime == "image/gif":
@@ -199,20 +210,26 @@ class TelegramChatHandler(ChatHandler):
 
                 try:
                     message = await method(form_data, **params)
-                    self.__cache.reply_map.add(attachment.content, message['message_id'])
-                except TelegramApiError:
+                    self.__cache.reply_map.add(
+                        attachment.content, message['message_id'])
+                except TelegramApiError as error:
                     await self.__api.sendMessage(
                         chat_id=self.address,
-                        text=f"Couldn't transfer file {attachment.content} from {attachment.sender}"
+                        text=f"Couldn't transfer file {
+                            attachment.content} from {attachment.sender}"
                     )
-                    self.__logger.exception("Failed to send file to telegram")
+                    self.__logger.error(
+                        "Failed to send file to telegram: %s", error
+                    )
 
     async def edit_message(self, message: Message) -> None:
-        telegram_id: str | None = self.__cache.message_ids.get(message.event_id)
+        telegram_id: str | None = self.__cache.message_ids.get(
+            message.event_id)
 
         if not telegram_id:
             self.__logger.info(
-                "Failed to found telegram message id for event: %d", message.event_id
+                "Failed to found telegram message id for event: %d",
+                message.event_id
             )
             return
 
@@ -229,7 +246,8 @@ class TelegramChatHandler(ChatHandler):
                 params["text"] = f"{message.sender}: {message.content}"
             else:
                 formatted_reply = "> " + message.reply.replace("\n", "\n> ")
-                params["text"] = f"{formatted_reply}\n{message.sender}: {message.content}"
+                params["text"] = f"{formatted_reply}\n{
+                    message.sender}: {message.content}"
                 params["entities"] = self.__make_bold_entity(
                     message.sender, len(formatted_reply) + 1
                 )
@@ -252,6 +270,7 @@ class TelegramChatHandler(ChatHandler):
         )
         await self.__api.leaveChat(chat_id=self.address)
 
+
 class TelegramClient(ChatHandlerFactory):
     def __init__(
         self,
@@ -269,7 +288,7 @@ class TelegramClient(ChatHandlerFactory):
         self.__service: ChatService = service
         self.__supported_attachment_types: tuple = (
             "sticker", "photo", "voice", "video",
-             "video_note", "document", "audio"
+            "video_note", "document", "audio"
         )
         self.__service.register_factory(self)
         self.__messages = messages
@@ -336,31 +355,33 @@ class TelegramClient(ChatHandlerFactory):
 
             params["offset"] = updates[len(updates) - 1]['update_id'] + 1
 
-
     async def __bridge_command(self, chat_id: str, cmd: str):
         try:
-            muc_address = cmd.split(" ")[1]
+            try:
+                muc_address = cmd.split(" ")[1]
 
-            # Check that MUC jid is valid
-            JID(muc_address)
+                # Check that MUC jid is valid
+                JID(muc_address)
 
-            self.__service.pending(muc_address, chat_id)
+                self.__service.pending(muc_address, chat_id)
 
-            await self.__api.sendMessage(
-                chat_id=chat_id,
-                text=self.__messages.queueing_message.format(self.__jid)
-            )
-        except IndexError:
-            await self.__api.sendMessage(
-                chat_id=chat_id,
-                text=self.__messages.missing_muc_jid
-            )
-        except TelegramApiError as err:
-            self.__logger.exception(err)
-        except InvalidJID:
-            await self.__api.sendMessage(
-                "sendMessage", chat_id=chat_id,
-                text=self.__messages.invalid_jid
+                await self.__api.sendMessage(
+                    chat_id=chat_id,
+                    text=self.__messages.queueing_message.format(self.__jid)
+                )
+            except IndexError:
+                await self.__api.sendMessage(
+                    chat_id=chat_id,
+                    text=self.__messages.missing_muc_jid
+                )
+            except InvalidJID:
+                await self.__api.sendMessage(
+                    "sendMessage", chat_id=chat_id,
+                    text=self.__messages.invalid_jid
+                )
+        except TelegramApiError as error:
+            self.__logger.error(
+                "Error processing the bridge command: %s", error
             )
 
     def __unpack_attachment(self, sender: str, message: dict) -> tuple | None:
@@ -412,7 +433,6 @@ class TelegramClient(ChatHandlerFactory):
 
         return attachment_type, file_id, file_unique_id, fname, mime, fsize
 
-
     def __get_reply(self, message: dict) -> str | None:
         reply: dict | None = message.get("reply_to_message")
         if reply:
@@ -432,9 +452,11 @@ class TelegramClient(ChatHandlerFactory):
         chat_id = str(raw_message['chat']['id'])
         sender: str = self.__get_full_name(raw_message['from'])
         message_id = str(raw_message['message_id'])
-        text: str | None = raw_message.get("text") or raw_message.get("caption")
+        text: str | None = raw_message.get(
+            "text") or raw_message.get("caption")
         reply: str | None = self.__get_reply(raw_message)
-        attachment: tuple | None = self.__unpack_attachment(sender, raw_message)
+        attachment: tuple | None = self.__unpack_attachment(
+            sender, raw_message)
 
         if attachment:
             attachment_type, file_id, file_unique_id, fname, mime, fsize = attachment
@@ -443,7 +465,8 @@ class TelegramClient(ChatHandlerFactory):
                 try:
                     file = await self.__api.getFile(file_id=file_id)
                     file_path = file['file_path']
-                    url = f"https://api.telegram.org/file/bot{self.__token}/{file_path}"
+                    url = f"https://api.telegram.org/file/bot{
+                        self.__token}/{file_path}"
                     return url
                 except TelegramApiError as error:
                     self.__logger.error(
@@ -453,28 +476,29 @@ class TelegramClient(ChatHandlerFactory):
             if attachment_type == "sticker":
                 await self.__disptacher.send(
                     Sticker(
-                       event_id=message_id,
-                       content=fname,
-                       address=chat_id,
-                       sender=sender,
-                       file_id=file_unique_id,
-                       mime=mime,
-                       fsize=fsize,
-                       url_callback=url_callback
+                        event_id=message_id,
+                        content=fname,
+                        address=chat_id,
+                        sender=sender,
+                        file_id=file_unique_id,
+                        mime=mime,
+                        fsize=fsize,
+                        url_callback=url_callback
                     )
                 )
             else:
                 await self.__disptacher.send(
                     Attachment(
-                       event_id=message_id,
-                       address=chat_id,
-                       sender=sender,
-                       content=fname,
-                       # if we have text, reply should be nested in the message below
-                       reply=None if text else reply,
-                       mime=mime,
-                       fsize=fsize,
-                       url_callback=url_callback
+                        event_id=message_id,
+                        address=chat_id,
+                        sender=sender,
+                        content=fname,
+                        # if we have text, reply should be nested
+                        # in the message below
+                        reply=None if text else reply,
+                        mime=mime,
+                        fsize=fsize,
+                        url_callback=url_callback
                     )
                 )
 
