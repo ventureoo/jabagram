@@ -22,18 +22,24 @@ from typing import Callable, Optional
 
 from .cache import Cache
 
+
 @dataclass(kw_only=True)
 class Forwardable():
     address: str
+
 
 @dataclass(kw_only=True)
 class UnbridgeEvent(Forwardable):
     pass
 
+
 @dataclass(kw_only=True)
 class Event(Forwardable):
     event_id: str
     content: str
+
+    def __str__(self):
+        return (f'Event(event_id=\'{self.event_id}\')')
 
 
 @dataclass(kw_only=True)
@@ -42,11 +48,24 @@ class Message(Event):
     reply: Optional[str] = None
     edit: Optional[bool] = False
 
+    def __str__(self):
+        return (f'Message(event_id=\'{self.event_id}\', '
+                f'sender=\'{self.sender}\', is_reply={self.reply is not None},'
+                f' is_edit={self.edit})')
+
+
 @dataclass(kw_only=True)
 class Attachment(Message):
     url_callback: Callable
     mime: Optional[str] = None
     fsize: Optional[int] = None
+
+    def __str__(self):
+        return (f'Attachment(event_id=\'{self.event_id}\', '
+                f'sender=\'{self.sender}\', is_reply={self.reply is not None},'
+                f' is_edit={self.edit}, mime=\'{self.mime}\', '
+                f'fsize=\'{self.fsize}\')')
+
 
 @dataclass(kw_only=True)
 class TelegramAttachment():
@@ -56,6 +75,7 @@ class TelegramAttachment():
     fname: str
     mime: Optional[str] = None
     fsize: Optional[int] = None
+
 
 @dataclass(kw_only=True)
 class Sticker(Attachment):
@@ -92,6 +112,7 @@ class ChatHandler(ABC):
     @property
     def address(self):
         return self.__address
+
 
 class ChatHandlerFactory(ABC):
     @abstractmethod

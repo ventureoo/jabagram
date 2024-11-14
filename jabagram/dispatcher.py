@@ -32,8 +32,10 @@ from .model import (
     UnbridgeEvent,
 )
 
+
 class MessageDispatcher():
     """ A class that dispatches messages/events/etc between chat handlers """
+
     def __init__(self, database: Database):
         self.__loop = asyncio.get_event_loop()
         self.__chat_map: Dict[str, ChatHandler] = {}
@@ -47,13 +49,17 @@ class MessageDispatcher():
         """
         while True:
             forwardable: Forwardable = await self.__event_queue.get()
-            handler: ChatHandler | None = self.__chat_map.get(forwardable.address)
-            self.__logger.debug("Received event: %s", forwardable)
+            handler: ChatHandler | None = self.__chat_map.get(
+                forwardable.address
+            )
+            self.__logger.info("Received event: %s", forwardable)
             if handler:
                 if isinstance(forwardable, Sticker):
                     self.__loop.create_task(handler.send_sticker(forwardable))
                 elif isinstance(forwardable, Attachment):
-                    self.__loop.create_task(handler.send_attachment(forwardable))
+                    self.__loop.create_task(
+                        handler.send_attachment(forwardable)
+                    )
                 elif isinstance(forwardable, Message):
                     message: Message = cast(Message, forwardable)
                     if message.edit:
