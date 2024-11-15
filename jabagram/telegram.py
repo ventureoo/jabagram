@@ -287,10 +287,6 @@ class TelegramClient(ChatHandlerFactory):
         self.__logger = logging.getLogger(__class__.__name__)
         self.__disptacher: MessageDispatcher = dispatcher
         self.__service: ChatService = service
-        self.__supported_attachment_types: tuple = (
-            "sticker", "photo", "voice", "video",
-            "video_note", "document", "audio"
-        )
         self.__service.register_factory(self)
         self.__messages = messages
 
@@ -308,16 +304,6 @@ class TelegramClient(ChatHandlerFactory):
         )
         self.__disptacher.add_handler(muc, handler)
 
-    def __filter_update(self, update: dict):
-        chat = update.get('chat')
-
-        if chat and chat['type'] != "private":
-            chat_id = str(chat['id'])
-            if self.__disptacher.is_chat_bound(chat_id):
-                return True
-
-        return False
-
     async def start(self):
         params = {
             "allowed_updates": ['message', 'edited_message', 'my_chat_member']
@@ -333,30 +319,28 @@ class TelegramClient(ChatHandlerFactory):
                 continue
 
             for update in updates:
-                if update.get("message"):
-                    message = update.get("message")
-                    if self.__filter_update(message):
+                match update:
+                    case {"message": {"chat": {
+                        "type": "group" | "supergroup", "id": chat
+                    }} as message} if self.__disptacher.is_bound(str(chat)):
                         await self.__process_message(message)
-                    else:
-                        if message['chat']['type'] != "private":
-                            text = message.get("text")
-                            if text and text.startswith("/jabagram"):
-                                await self.__bridge_command(
-                                    str(message['chat']['id']), text
-                                )
-
-                elif update.get("edited_message"):
-                    edit_message = update.get("edited_message")
-                    if self.__filter_update(edit_message):
-                        await self.__process_message(edit_message, edit=True)
-                elif update.get("my_chat_member"):
-                    member = update.get("my_chat_member")
-                    if self.__filter_update(member):
+                    case {"message": {"text": text, "chat": {
+                        "type": "group" | "supergroup", "id": chat
+                    }}} if not self.__disptacher.is_bound(str(chat)) \
+                            and text.startswith("/jabagram"):
+                        await self.__bridge_command(chat, text)
+                    case {"edited_message": {"chat": {
+                        "type": "group" | "supergroup", "id": chat
+                    }} as message} if self.__disptacher.is_bound(str(chat)):
+                        await self.__process_message(message, edit=True)
+                    case {"my_chat_member": {"chat": {
+                        "type": "group" | "supergroup", "id": chat
+                    }} as member} if self.__disptacher.is_bound(str(chat)):
                         await self.__process_kick_event(member)
 
             params["offset"] = updates[len(updates) - 1]['update_id'] + 1
 
-    async def __bridge_command(self, chat_id: str, cmd: str):
+    async def __bridge_command(self, chat_id: str, cmd: str) -> None:
         try:
             try:
                 muc_address = cmd.split(" ")[1]
@@ -390,61 +374,55 @@ class TelegramClient(ChatHandlerFactory):
             sender: str,
             message: dict
     ) -> TelegramAttachment | None:
-        attachment = None
-        attachment_type = None
-        for name in self.__supported_attachment_types:
-            attachment = message.get(name)
-            if attachment:
-                attachment_type = name
-                break
-        else:
-            return None
+        match message:
+            case {"audio": attachment} | {"video": attachment} \
+                    | {"animation": attachment} | {"document": attachment}:
+                prefix = "Media" if attachment.get("duration") else "Document"
+                extension = mimetypes.guess_extension(
+                    attachment.get("mime") or ""
+                )
+                return TelegramAttachment(
+                    fname=attachment.get("file_name") or (
+                        f"{prefix} from {sender}.{extension}"
+                        if extension else attachment['file_id']
+                    ),
+                    file_id=attachment['file_id'],
+                    file_unique_id=attachment['file_unique_id'],
+                    fsize=attachment.get("file_size"),
+                    mime=attachment.get("mime")
+                )
+            case {"photo": [*_, photo]}:
+                return TelegramAttachment(
+                    fname=f"Photo from {sender}.jpg",
+                    file_id=photo['file_id'],
+                    file_unique_id=photo['file_unique_id'],
+                    fsize=photo.get("file_size"),
+                    mime="image/jpeg"
+                )
+            case {"voice": voice}:
+                return TelegramAttachment(
+                    fname=f"Voice message from {sender}.ogg",
+                    file_id=voice['file_id'],
+                    file_unique_id=voice['file_unique_id'],
+                    fsize=voice.get("file_size"),
+                    mime="audio/ogg"
+                )
+            # We do not send animated stickers because they are in TGS format,
+            # which cannot be properly rendered in XMPP clients.
+            case {"sticker": sticker} if not sticker.get("is_animated"):
+                extension = "webm" if sticker.get("is_video") else "webp"
+                emoji = sticker['emoji'] if sticker.get("emoji") else ""
+                return TelegramAttachment(
+                    is_cacheable=True,
+                    fname=f"Sticker {emoji} from {sender}.{extension}",
+                    file_id=sticker['file_id'],
+                    file_unique_id=sticker['file_unique_id'],
+                    fsize=sticker.get("file_size"),
+                    mime="image/webm" if sticker.get(
+                        "is_video") else "video/webp"
+                )
 
-        # Check for maximum available PhotoSize
-        if isinstance(attachment, list):
-            attachment = attachment[-1]
-
-        file_id = attachment.get("file_id")
-        file_unique_id = attachment.get("file_unique_id")
-        fname = attachment.get("file_name") or file_unique_id
-        mime = attachment.get("mime_type")
-        fsize = attachment.get("file_size")
-
-        if attachment_type == "photo":
-            # Telegram compresses all photos to JPEG
-            # if they were not sent as a document
-            mime = "image/jpeg"
-            fname += ".jpg"
-        elif attachment_type == "sticker":
-            fname = f"Sticker from {sender}"
-            if attachment.get("emoji"):
-                fname += " " + attachment["emoji"]
-            if attachment.get("is_video"):
-                mime = "video/mp4"
-                fname += ".mp4"
-            elif not attachment.get("is_animated"):
-                mime = "image/webp"
-                fname += ".webp"
-        elif attachment_type == "voice":
-            fname = f"Voice message from {sender}.ogg"
-        elif attachment_type == "video_note":
-            fname = f"Video from {sender}.mp4"
-        else:
-            if mime:
-                extension = mimetypes.guess_extension(mime)
-
-                if extension and not fname.endswith(extension):
-                    fname += extension
-
-        telegram_attachment = TelegramAttachment(
-            attachment_type=attachment_type,
-            file_id=file_id,
-            file_unique_id=file_unique_id,
-            fname=fname,
-            mime=mime,
-            fsize=fsize
-        )
-        return telegram_attachment
+        return None
 
     def __get_reply(self, message: dict) -> str | None:
         reply: dict | None = message.get("reply_to_message")
@@ -484,7 +462,8 @@ class TelegramClient(ChatHandlerFactory):
                         "Failed to get url of attachment: %s", error
                     )
 
-            if attachment.attachment_type == "sticker":
+            # Right now we can cache only stickers
+            if attachment.is_cacheable:
                 await self.__disptacher.send(
                     Sticker(
                         event_id=message_id,

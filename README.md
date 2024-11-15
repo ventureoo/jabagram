@@ -23,7 +23,7 @@ The bridge supports all of the base capabilities:
 
 ## Deploy
 
-For the bridge to work, you need to use Python 3.8+, and install all the
+For the bridge to work, you need to use Python 3.10+, and install all the
 dependencies specified in the ``requirements.txt``(slixmpp, aiohttp) file:
 
 ```

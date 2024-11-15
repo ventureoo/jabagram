@@ -69,7 +69,7 @@ class Attachment(Message):
 
 @dataclass(kw_only=True)
 class TelegramAttachment():
-    attachment_type: str
+    is_cacheable: bool = False
     file_id: str
     file_unique_id: str
     fname: str

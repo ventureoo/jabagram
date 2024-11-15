@@ -140,7 +140,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
     async def __process_errors(self, message):
         room = message['from'].bare
         if message['error']['text'] == XMPP_OCCUPANT_ERROR \
-                and self.__dispatcher.is_chat_bound(room):
+                and self.__dispatcher.is_bound(room):
             await self.plugin['xep_0045'].join_muc_wait(
                 message['from'],
                 BRIDGE_DEFAULT_NAME,
@@ -153,7 +153,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         muc = message['mucroom']
         text = message['body']
 
-        if not self.__dispatcher.is_chat_bound(muc):
+        if not self.__dispatcher.is_bound(muc):
             return
 
         if sender.endswith("(Telegram)") or \

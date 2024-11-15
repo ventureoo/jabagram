@@ -19,7 +19,7 @@
 import asyncio
 from asyncio import Queue
 import logging
-from typing import Dict, cast
+from typing import Dict
 
 from .database import Database
 from .model import (
@@ -53,30 +53,40 @@ class MessageDispatcher():
                 forwardable.address
             )
             self.__logger.info("Received event: %s", forwardable)
-            if handler:
-                if isinstance(forwardable, Sticker):
-                    self.__loop.create_task(handler.send_sticker(forwardable))
-                elif isinstance(forwardable, Attachment):
+            if not handler:
+                self.__logger.error(
+                    "Unhandled event for chat: %s", forwardable.address
+                )
+                continue
+
+            match forwardable:
+                case Sticker():
+                    self.__loop.create_task(
+                        handler.send_sticker(
+                            forwardable)
+                    )
+                case Attachment():
                     self.__loop.create_task(
                         handler.send_attachment(forwardable)
                     )
-                elif isinstance(forwardable, Message):
-                    message: Message = cast(Message, forwardable)
-                    if message.edit:
-                        self.__loop.create_task(handler.edit_message(message))
+                case Message():
+                    if forwardable.edit:
+                        self.__loop.create_task(
+                            handler.edit_message(forwardable)
+                        )
                     else:
-                        self.__loop.create_task(handler.send_message(message))
-                elif isinstance(forwardable, Event):
-                    self.__loop.create_task(handler.send_event(forwardable))
-                elif isinstance(forwardable, UnbridgeEvent):
+                        self.__loop.create_task(
+                            handler.send_message(forwardable)
+                        )
+                case Event():
+                    self.__loop.create_task(
+                        handler.send_event(forwardable)
+                    )
+                case UnbridgeEvent():
                     await handler.unbridge()
                     del self.__chat_map[forwardable.address]
                     del self.__chat_map[handler.address]
                     self.__database.remove(handler.address)
-            else:
-                self.__logger.error(
-                    "Unhandled event for chat: %s", forwardable.address
-                )
 
     async def send(self, forwardable: Forwardable):
         """Put event inside event queue"""
@@ -86,9 +96,9 @@ class MessageDispatcher():
         """Add chat handler that recieves events"""
         self.__chat_map[address] = handler
 
-    def is_chat_bound(self, address: str):
+    def is_bound(self, chat: str):
         """Check if the chat is inside the chat handlers map"""
-        return address in self.__chat_map
+        return chat in self.__chat_map
 
     def remove_handler(self, address: str):
         """Remove chat handler from chat handlers map"""
