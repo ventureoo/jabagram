@@ -78,8 +78,12 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         # Common event handlers
         self.add_event_handler("session_start", self.__session_start)
         self.add_event_handler("groupchat_message", self.__process_message)
-        self.add_event_handler("groupchat_message_error", self.__process_errors)
-        self.add_event_handler('groupchat_direct_invite', self.__invite_callback)
+        self.add_event_handler(
+            "groupchat_message_error", self.__process_errors
+        )
+        self.add_event_handler(
+            'groupchat_direct_invite', self.__invite_callback
+        )
         self.add_event_handler("disconnected", self.__on_connection_reset)
         self.add_event_handler("connected", self.__on_connected)
         self.__reconnecting = False
@@ -90,10 +94,10 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.connect()
 
     async def create_handler(
-            self,
-            address: str,
-            muc: str,
-            cache: Cache,
+        self,
+        address: str,
+        muc: str,
+        cache: Cache,
     ) -> None:
         handler = XmppRoomHandler(
             muc,
@@ -112,9 +116,9 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         )
         self.__dispatcher.add_handler(address, handler)
 
-
     async def __on_connection_reset(self, event):
-        self.__logger.warning("Connection reset: %s. Attempting to reconnect...", event)
+        self.__logger.warning(
+            "Connection reset: %s. Attempting to reconnect...", event)
         self.__reconnecting = True
 
         # Wait for synchronous handlers
@@ -168,13 +172,13 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
             fname = url.split("/")[-1]
             attachment = Attachment(
-               event_id=message_id,
-               address=muc,
-               sender=sender,
-               url_callback=url_callback,
-               content=fname,
-               mime=None,
-               fsize=None
+                event_id=message_id,
+                address=muc,
+                sender=sender,
+                url_callback=url_callback,
+                content=fname,
+                mime=None,
+                fsize=None
             )
             await self.__dispatcher.send(attachment)
         else:
@@ -235,14 +239,16 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
         return reply, body
 
+
 class XmppRoomHandler(ChatHandler):
-    def __init__(self,
+    def __init__(
+        self,
         address: str,
         client: XmppClient,
         cache: Cache,
         sticker_cache: StickerCache,
         messages: Messages
-    ):
+    ) -> None:
         super().__init__(address)
         self.__client = client
         self.__muc = JID(address)
@@ -252,7 +258,6 @@ class XmppRoomHandler(ChatHandler):
         self.__nick_change_event = asyncio.Event()
         self.__sticker_cache = sticker_cache
         self.__messages = messages
-
 
     def nick_change_handler(self, presence):
         nick = presence['from'].resource
@@ -361,7 +366,9 @@ class XmppRoomHandler(ChatHandler):
                                 "Cache miss for a file: %s", sticker.file_id
                             )
             except ClientConnectionError as error:
-                self.__logger.error("Cannot do head request for file: %s", error)
+                self.__logger.error(
+                    "Cannot do head request for file: %s", error
+                )
                 return
 
         if not url:
@@ -393,6 +400,8 @@ class XmppRoomHandler(ChatHandler):
             self.__logger.info(
                 "Sticker %s was taken from the cache", sticker.file_id
             )
+
+        await self.__change_nick(sticker.sender)
 
         html = (
             f'<body xmlns="http://www.w3.org/1999/xhtml">'
