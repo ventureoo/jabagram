@@ -388,7 +388,7 @@ class XmppRoomHandler(ChatHandler):
                     async with session.get(attachment_url) as resp:
                         url = await upload_file(
                             filename=sticker.content,
-                            size=sticker.fsize or resp.length,
+                            size=sticker.fsize or resp.content_length,
                             content_type=sticker.mime or resp.content_type,
                             input_file=resp.content
                         )
