@@ -26,7 +26,7 @@ import aiohttp
 from aiohttp import ClientConnectionError
 from jabagram.messages import Messages
 from slixmpp.clientxmpp import ClientXMPP
-from slixmpp.exceptions import IqTimeout
+from slixmpp.exceptions import IqTimeout, PresenceError
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
 
@@ -106,15 +106,20 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             self.__sticker_cache,
             self.__messages
         )
-        self.add_event_handler(
-            f"muc::{muc}::got_online", handler.nick_change_handler
-        )
-        await self.plugin['xep_0045'].join_muc_wait(
-            JID(muc),
-            BRIDGE_DEFAULT_NAME,
-            maxstanzas=0
-        )
-        self.__dispatcher.add_handler(address, handler)
+
+        try:
+            self.add_event_handler(
+                f"muc::{muc}::got_online", handler.nick_change_handler
+            )
+            await self.plugin['xep_0045'].join_muc_wait(
+                JID(muc),
+                BRIDGE_DEFAULT_NAME,
+                maxstanzas=0
+            )
+            self.__dispatcher.add_handler(address, handler)
+        except PresenceError as error:
+            self.__logger.error("Failed to join muc: %s", error)
+
 
     async def __on_connection_reset(self, event):
         self.__logger.warning(
