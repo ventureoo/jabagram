@@ -215,11 +215,18 @@ class TelegramChatHandler(ChatHandler):
                         self.__cache.reply_map.add(
                             attachment.content, message['message_id'])
                     except TelegramApiError as error:
-                        await self.__api.sendMessage(
-                            chat_id=self.address,
-                            text=f"Couldn't transfer file {
-                                attachment.content} from {attachment.sender}"
-                        )
+                        try:
+                            await self.__api.sendMessage(
+                                chat_id=self.address,
+                                text=f"Couldn't transfer file {
+                                    attachment.content} from {attachment.sender}"
+                            )
+                        except TelegramApiError as send_message_error:
+                            self.__logger.error(
+                                "Failed to send error message: %s",
+                                send_message_error
+                            )
+
                         self.__logger.error(
                             "Failed to send file to telegram: %s", error
                         )
@@ -262,17 +269,27 @@ class TelegramChatHandler(ChatHandler):
             self.__logger.error("Error while editing a message: %s", error)
 
     async def send_event(self, event: Event) -> None:
-        await self.__api.sendMessage(
-            chat_id=self.address,
-            text=event.content
-        )
+        try:
+            await self.__api.sendMessage(
+                chat_id=self.address,
+                text=event.content
+            )
+        except TelegramApiError as error:
+            self.__logger.error(
+                "Failed to send event: %s", error
+            )
 
     async def unbridge(self) -> None:
-        await self.__api.sendMessage(
-            chat_id=self.address,
-            text=self.__messages.unbridge_telegram
-        )
-        await self.__api.leaveChat(chat_id=self.address)
+        try:
+            await self.__api.sendMessage(
+                chat_id=self.address,
+                text=self.__messages.unbridge_telegram
+            )
+            await self.__api.leaveChat(chat_id=self.address)
+        except TelegramApiError as error:
+            self.__logger.error(
+                "Failed to unbridge chat: %s", error
+            )
 
 
 class TelegramClient(ChatHandlerFactory):
@@ -451,17 +468,17 @@ class TelegramClient(ChatHandlerFactory):
 
     def __get_reply(self, message: dict) -> str | None:
         reply: dict | None = message.get("reply_to_message")
-        if reply:
-            sender: str = self.__get_full_name(reply['from'])
-            attachment = self.__extract_attachment(sender, reply)
-            reply_body = reply.get("text") or reply.get("caption")
+        if not reply:
+            return None
 
-            if not reply_body and attachment:
-                reply_body = attachment.fname
+        sender: str = self.__get_full_name(reply['from'])
+        attachment = self.__extract_attachment(sender, reply)
+        reply_body = reply.get("text") or reply.get("caption")
 
-            return reply_body
+        if not reply_body and attachment:
+            reply_body = attachment.fname
 
-        return None
+        return reply_body
 
     async def __process_message(self, raw_message: dict, edit=False) -> None:
         chat_id = str(raw_message['chat']['id'])
