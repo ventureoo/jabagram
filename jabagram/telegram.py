@@ -378,38 +378,6 @@ class TelegramClient(ChatHandlerFactory):
             message: dict
     ) -> TelegramAttachment | None:
         match message:
-            case {"audio": attachment} | {"video": attachment} \
-                    | {"animation": attachment} | {"document": attachment}:
-                prefix = "Media" if attachment.get("duration") else "Document"
-                extension = mimetypes.guess_extension(
-                    attachment.get("mime") or ""
-                )
-                return TelegramAttachment(
-                    fname=attachment.get("file_name") or (
-                        f"{prefix} from {sender}.{extension}"
-                        if extension else attachment['file_id']
-                    ),
-                    file_id=attachment['file_id'],
-                    file_unique_id=attachment['file_unique_id'],
-                    fsize=attachment.get("file_size"),
-                    mime=attachment.get("mime")
-                )
-            case {"photo": [*_, photo]}:
-                return TelegramAttachment(
-                    fname=f"Photo from {sender}.jpg",
-                    file_id=photo['file_id'],
-                    file_unique_id=photo['file_unique_id'],
-                    fsize=photo.get("file_size"),
-                    mime="image/jpeg"
-                )
-            case {"voice": voice}:
-                return TelegramAttachment(
-                    fname=f"Voice message from {sender}.ogg",
-                    file_id=voice['file_id'],
-                    file_unique_id=voice['file_unique_id'],
-                    fsize=voice.get("file_size"),
-                    mime="audio/ogg"
-                )
             # We do not send animated stickers because they are in TGS format,
             # which cannot be properly rendered in XMPP clients.
             case {"sticker": sticker} if not sticker.get("is_animated"):
@@ -423,6 +391,60 @@ class TelegramClient(ChatHandlerFactory):
                     fsize=sticker.get("file_size"),
                     mime="image/webm" if sticker.get(
                         "is_video") else "video/webp"
+                )
+            case {"photo": [*_, photo]}:
+                return TelegramAttachment(
+                    fname=f"Photo from {sender}.jpg",
+                    file_id=photo['file_id'],
+                    file_unique_id=photo['file_unique_id'],
+                    fsize=photo.get("file_size"),
+                    mime="image/jpeg"
+                )
+            case {"video": video} | {"video_note": video} | \
+                    {"animation": video}:
+                mime = video.get("mime_type")
+                extension = mimetypes.guess_extension(mime or "video/mp4")
+                return TelegramAttachment(
+                    fname=video.get("file_name") or (
+                        f"Video from {sender}.{extension}"
+                    ),
+                    file_id=video['file_id'],
+                    file_unique_id=video['file_unique_id'],
+                    fsize=video.get("file_size"),
+                    mime=mime
+                )
+            case {"voice": voice}:
+                return TelegramAttachment(
+                    fname=f"Voice message from {sender}.ogg",
+                    file_id=voice['file_id'],
+                    file_unique_id=voice['file_unique_id'],
+                    fsize=voice.get("file_size"),
+                    mime="audio/ogg"
+                )
+            case {"audio": audio}:
+                mime = audio.get("mime_type")
+                extension = mimetypes.guess_extension(mime or "audio/mpeg")
+                return TelegramAttachment(
+                    fname=audio.get("file_name") or (
+                        f"Audio from {sender}.{extension}"
+                    ),
+                    file_id=audio['file_id'],
+                    file_unique_id=audio['file_unique_id'],
+                    fsize=audio.get("file_size"),
+                    mime=mime
+                )
+            case {"document": document}:
+                mime = document.get("mime_type")
+                extension = "." + \
+                    (mimetypes.guess_extension(mime) or "") if mime else ""
+                return TelegramAttachment(
+                    fname=document.get("file_name") or (
+                        f"Document from {sender}{extension}"
+                    ),
+                    file_id=document['file_id'],
+                    file_unique_id=document['file_unique_id'],
+                    fsize=document.get("file_size"),
+                    mime=mime
                 )
 
         return None
