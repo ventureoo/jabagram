@@ -170,58 +170,61 @@ class TelegramChatHandler(ChatHandler):
     async def send_attachment(self, attachment: Attachment) -> None:
         url = await attachment.url_callback()
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status not in (200, 201):
-                    self.__logger.error(
-                        "Error while getting %s file: %d", url, resp.status
-                    )
-                    return
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status not in (200, 201):
+                        self.__logger.error(
+                            "Error while getting %s file: %d", url, resp.status
+                        )
+                        return
 
-                mime = resp.content_type
-                form_data = aiohttp.FormData()
-                form_data.add_field(
-                    'file', resp.content, filename=attachment.content,
-                    content_type=mime
-                )
-
-                method = self.__api.sendDocument
-                params = {
-                    "chat_id": self.address,
-                    "caption": f"{attachment.sender}: ",
-                    "caption_entities": self.__make_bold_entity(
-                        attachment.sender, offset=0
+                    mime = resp.content_type
+                    form_data = aiohttp.FormData()
+                    form_data.add_field(
+                        'file', resp.content, filename=attachment.content,
+                        content_type=mime
                     )
-                }
 
-                if mime == "image/gif":
-                    method = self.__api.sendAnimation
-                    params['animation'] = "attach://file"
-                elif mime.startswith("image"):
-                    method = self.__api.sendPhoto
-                    params['photo'] = "attach://file"
-                elif mime.startswith("video"):
-                    method = self.__api.sendVideo
-                    params['video'] = "attach://file"
-                elif mime.startswith("audio"):
-                    method = self.__api.sendAudio
-                    params['audio'] = "attach://file"
-                else:
-                    params['document'] = "attach://file"
+                    method = self.__api.sendDocument
+                    params = {
+                        "chat_id": self.address,
+                        "caption": f"{attachment.sender}: ",
+                        "caption_entities": self.__make_bold_entity(
+                            attachment.sender, offset=0
+                        )
+                    }
 
-                try:
-                    message = await method(form_data, **params)
-                    self.__cache.reply_map.add(
-                        attachment.content, message['message_id'])
-                except TelegramApiError as error:
-                    await self.__api.sendMessage(
-                        chat_id=self.address,
-                        text=f"Couldn't transfer file {
-                            attachment.content} from {attachment.sender}"
-                    )
-                    self.__logger.error(
-                        "Failed to send file to telegram: %s", error
-                    )
+                    if mime == "image/gif":
+                        method = self.__api.sendAnimation
+                        params['animation'] = "attach://file"
+                    elif mime.startswith("image"):
+                        method = self.__api.sendPhoto
+                        params['photo'] = "attach://file"
+                    elif mime.startswith("video"):
+                        method = self.__api.sendVideo
+                        params['video'] = "attach://file"
+                    elif mime.startswith("audio"):
+                        method = self.__api.sendAudio
+                        params['audio'] = "attach://file"
+                    else:
+                        params['document'] = "attach://file"
+
+                    try:
+                        message = await method(form_data, **params)
+                        self.__cache.reply_map.add(
+                            attachment.content, message['message_id'])
+                    except TelegramApiError as error:
+                        await self.__api.sendMessage(
+                            chat_id=self.address,
+                            text=f"Couldn't transfer file {
+                                attachment.content} from {attachment.sender}"
+                        )
+                        self.__logger.error(
+                            "Failed to send file to telegram: %s", error
+                        )
+        except ClientConnectionError as error:
+            self.__logger.error("Failed to upload attachment: %s", error)
 
     async def edit_message(self, message: Message) -> None:
         telegram_id: str | None = self.__cache.message_ids.get(
