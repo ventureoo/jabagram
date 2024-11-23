@@ -152,8 +152,10 @@ class TelegramChatHandler(ChatHandler):
                 params["reply_to_message_id"] = telegram_id
             else:
                 formatted_reply = "> " + message.reply.replace("\n", "\n> ")
-                params["text"] = f"{formatted_reply}\n{
-                    message.sender}: {message.content}"
+                params["text"] = (
+                    f"{formatted_reply}\n"
+                    f"{message.sender}: {message.content}"
+                )
                 params["entities"] = self.__make_bold_entity(
                     message.sender, len(formatted_reply) + 1
                 )
@@ -218,8 +220,11 @@ class TelegramChatHandler(ChatHandler):
                         try:
                             await self.__api.sendMessage(
                                 chat_id=self.address,
-                                text=f"Couldn't transfer file {
-                                    attachment.content} from {attachment.sender}"
+                                text=(
+                                    "Couldn't transfer file"
+                                    f"{attachment.content} "
+                                    f"from {attachment.sender}"
+                                )
                             )
                         except TelegramApiError as send_message_error:
                             self.__logger.error(
@@ -257,8 +262,10 @@ class TelegramChatHandler(ChatHandler):
                 params["text"] = f"{message.sender}: {message.content}"
             else:
                 formatted_reply = "> " + message.reply.replace("\n", "\n> ")
-                params["text"] = f"{formatted_reply}\n{
-                    message.sender}: {message.content}"
+                params["text"] = (
+                    f"{formatted_reply}\n"
+                    f"{message.sender}: {message.content}"
+                )
                 params["entities"] = self.__make_bold_entity(
                     message.sender, len(formatted_reply) + 1
                 )
@@ -496,8 +503,10 @@ class TelegramClient(ChatHandlerFactory):
                 try:
                     file = await self.__api.getFile(file_id=attachment.file_id)
                     file_path = file['file_path']
-                    url = f"https://api.telegram.org/file/bot{
-                        self.__token}/{file_path}"
+                    url = (
+                        f"https://api.telegram.org/file/bot"
+                        f"{self.__token}/{file_path}"
+                    )
                     return url
                 except TelegramApiError as error:
                     self.__logger.error(
