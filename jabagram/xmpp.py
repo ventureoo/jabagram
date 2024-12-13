@@ -69,6 +69,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.__logger = logging.getLogger(self.__class__.__name__)
         self.__dispatcher = disptacher
         self.__sticker_cache = sticker_cache
+        self.__mucs = []
 
         # Used XEPs
         xeps = ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
@@ -116,6 +117,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
                 BRIDGE_DEFAULT_NAME,
                 maxstanzas=0
             )
+            self.__mucs.append(muc)
             self.__dispatcher.add_handler(address, handler)
         except PresenceError as error:
             self.__logger.error("Failed to join muc: %s", error)
@@ -135,7 +137,25 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         await self.get_roster()
         self.send_presence()
 
-        if not self.__reconnecting:
+        if self.__reconnecting:
+            for muc in self.__mucs:
+                try:
+                    self.__logger.info(
+                        "Trying to rejoin %s room...", muc
+                    )
+                    await self.plugin['xep_0045'].join_muc_wait(
+                        JID(muc),
+                        BRIDGE_DEFAULT_NAME,
+                        maxstanzas=0
+                    )
+                    self.__logger.info(
+                        "Successfully rejoined to the room %s"
+                    )
+                except PresenceError as error:
+                    self.__logger.error(
+                        "Failed to re-join into MUC: %s", error
+                    )
+        else:
             await self.__service.load_chats()
 
     async def __on_connected(self, _):
