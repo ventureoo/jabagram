@@ -18,11 +18,13 @@
 
 import asyncio
 from json import dumps
+from typing import Optional, Type
+from types import TracebackType
 import logging
 import mimetypes
 
 import aiohttp
-from aiohttp import ClientConnectionError
+from aiohttp import ClientConnectionError, ClientResponseError
 from jabagram.messages import Messages
 from slixmpp.jid import InvalidJID, JID
 
@@ -51,65 +53,90 @@ class TelegramApiError(Exception):
 class TelegramApi():
     def __init__(self, token):
         self.__token = token
+        self.__session = aiohttp.ClientSession()
         self.__logger = logging.getLogger(__class__.__name__)
+
+    async def __aenter__(self) -> "TelegramApi":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        _: Optional[TracebackType]
+    ) -> None:
+        if exc_value and exc_type:
+            self.__logger.error(
+                "Unhandled exception occured: %s - %s",
+                exc_type,
+                exc_value.msg
+            )
+
+        await self.close()
+
+    async def close(self) -> None:
+        await self.__session.close()
 
     def __getattr__(self, method):
         async def wrapper(*file, **kwargs):
             url = f"https://api.telegram.org/bot{self.__token}/{method}"
-            timeout = aiohttp.client.ClientTimeout(total=300)
-
-            if method == "getUpdates":
-                timeout = aiohttp.client.ClientTimeout(total=0)
-
             params = {
-                "timeout": timeout,
                 "params": kwargs,
                 "data": file[0] if file else None
             }
             retry_attempts = 5
 
-            async with aiohttp.ClientSession() as session:
-                http_method = session.post if file else session.get
-                while retry_attempts > 0:
-                    try:
-                        async with http_method(url, **params) as response:
-                            if file and response.status != 200:
-                                raise TelegramApiError(
-                                    response.status, "Failed to upload file"
-                                )
+            while retry_attempts > 0:
+                if retry_attempts != 5:
+                    self.__logger.info(
+                        "Retry to send request, attempts left: %s",
+                        retry_attempts
+                    )
 
-                            results = await response.json()
+                retry_attempts = retry_attempts - 1
+                try:
+                    async with self.__session.post(
+                        url=url,
+                        **params
+                    ) as response:
+                        # If an unknown error occurred and the response
+                        # does not represent a valid TelegramApi error,
+                        # ClientResponseError is raised
+                        results = await response.json()
 
-                            if not results.get("ok"):
-                                parameters = results.get("parameters")
-                                error_code = results['error_code']
-                                desc = results['description']
-
-                                if parameters and \
-                                        parameters.get("retry_after"):
-                                    self.__logger.warning(
-                                        "Too many requests, request"
-                                        "will be executed again in: %d",
-                                        parameters['retry_after']
-                                    )
-                                    await asyncio.sleep(
-                                        parameters["retry_after"]
-                                    )
-                                    retry_attempts = retry_attempts - 1
-                                    continue
-
-                                raise TelegramApiError(error_code, desc)
-
+                        if results.get("ok"):
                             return results['result']
-                    except ClientConnectionError as error:
-                        self.__logger.error(
-                            "Failed to execute the request: %s", error
-                        )
-                        retry_attempts = retry_attempts - 1
 
-                raise TelegramApiError(
-                    -1, "The number of retry attempts has been exhausted"
-                )
+                        description = results.get('description')
+                        params = results.get("parameters")
+
+                        if response.status == 429 and params:
+                            timeout = params.get("retry_after")
+                            self.__logger.warning(
+                                "Too many requests, request "
+                                "will be executed again in: %d secs",
+                                timeout
+                            )
+                            await asyncio.sleep(timeout)
+                        else:
+                            raise TelegramApiError(
+                                response.status, description
+                            )
+
+                except ClientConnectionError as error:
+                    self.__logger.error(
+                        "Failed to execute the request: %s", error
+                    )
+                except ClientResponseError as error:
+                    self.__logger.error(
+                        "Failed to get Telegram response: %s", error
+                    )
+                except asyncio.TimeoutError:
+                    continue
+
+            raise TelegramApiError(
+                -1, "The number of retry attempts has been exhausted"
+            )
 
         return wrapper
 
