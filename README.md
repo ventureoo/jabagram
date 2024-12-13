@@ -11,8 +11,10 @@ configuration.
 
 ## Features
 
-The bridge supports all of the base capabilities:
+This bridge has the following features and supports all the basic capabilities:
 
+- [x] Lightweight and asynchronous, with support for bridging chats in runtime, without config editing
+- [x] Unlike other bridges, it doesn't require hosting your own XMPP server
 - [x] Forwarding between multiple pairs of chats at once instance (see below for usage)
 - [x] Forwarding of plain text messages
 - [x] Forwarding of attachments (videos, images, audio, etc)
@@ -58,15 +60,37 @@ An example of a config file that is given as ``config.example.ini``:
 # Telegram bot token, get it from @botfather
 [telegram]
 token=XXXXXXXXXX:XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
 # Login and password from the bot account in XMPP
 [xmpp]
 login=your_xmpp_user@example.org
 password=YoUr_SEcReT_PaSs
+
 # The secret key specified in the user's invitation to the MUC for linking two
 # chats. PLEASE change it from the default key if you don't want your bridge
 # instance to be used by whoever you want. Otherwise, leave it blank.
 [general]
 key=SUxvdmVYTVBQ
+
+# Further on is the service messages that are sent by a bot
+[messages.missing_muc_jid]
+line = Please specify the MUC address of room you want to pair with this Telegram chat.
+
+[messages.invalid_jid]
+line = You have specified an incorrect room JID. Please try again.
+
+[messages.queueing_message]
+line.1 = Specified room has been successfully placed on the queue.
+line.2 = Please invite this {} bot to your XMPP room, and as the reason for the invitation specify the secret key that is specified in bot's config or ask the owner of this bridge instance for it.
+line.3 = If you have specified an incorrect room address, simply repeat
+line.4 = the pair command (/jabagram) with the corrected address.
+
+[messages.unbridge_telegram]
+line.1 = This chat was automatically unbridged due to a bot kick in XMPP.
+line.2 = If you want to bridge it again, invite this bot to this chat again and use the /jabagram command.
+
+[messages.unbridge_xmpp]
+line.1 = This chat was automatically unbridged due to a bot kick in Telegram.
 ```
 
 ### Via Docker
