@@ -168,8 +168,8 @@ workaround.
 #### Animated stickers from Telegram
 
 Telegram has a proprietary format for animated stickers that probably can't be
-properly previewed by XMPP clients. However, the bridge still sends them as
-unorganized files.
+properly previewed by XMPP clients. The bridge will not forward them to XMPP
+because they cannot be properly rendered in any XMPP client.
 
 #### Forwarding private messages
 
