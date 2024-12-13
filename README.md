@@ -13,7 +13,7 @@ configuration.
 
 This bridge has the following features and supports all the basic capabilities:
 
-- [x] Lightweight and asynchronous, with support for bridging chats in runtime, without config editing
+- [x] Lightweight and asynchronous, with support for adding new chats in runtime, without config editing
 - [x] Unlike other bridges, it doesn't require hosting your own XMPP server
 - [x] Forwarding between multiple pairs of chats at once instance (see below for usage)
 - [x] Forwarding of plain text messages
