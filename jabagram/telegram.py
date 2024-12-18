@@ -24,7 +24,7 @@ import logging
 import mimetypes
 
 import aiohttp
-from aiohttp import ClientConnectionError, ClientResponseError
+from aiohttp import ClientConnectionError, ClientResponseError, TCPConnector
 from jabagram.messages import Messages
 from slixmpp.jid import InvalidJID, JID
 
@@ -53,7 +53,11 @@ class TelegramApiError(Exception):
 class TelegramApi():
     def __init__(self, token):
         self.__token = token
-        self.__session = aiohttp.ClientSession()
+        self.__session = aiohttp.ClientSession(
+            # Fix issues with long timeouts between messages
+            # https://github.com/aiogram/aiogram/issues/1500
+            connector=TCPConnector(ttl_dns_cache=1000)
+        )
         self.__logger = logging.getLogger(__class__.__name__)
 
     async def __aenter__(self) -> "TelegramApi":
@@ -69,7 +73,7 @@ class TelegramApi():
             self.__logger.error(
                 "Unhandled exception occured: %s - %s",
                 exc_type,
-                exc_value.msg
+                exc_value
             )
 
         await self.close()
