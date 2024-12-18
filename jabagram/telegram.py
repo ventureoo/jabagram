@@ -56,7 +56,7 @@ class TelegramApi():
         self.__session = aiohttp.ClientSession(
             # Fix issues with long timeouts between messages
             # https://github.com/aiogram/aiogram/issues/1500
-            connector=TCPConnector(ttl_dns_cache=1000)
+            connector=TCPConnector(ttl_dns_cache=3600)
         )
         self.__logger = logging.getLogger(__class__.__name__)
 
