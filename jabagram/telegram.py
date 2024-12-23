@@ -386,7 +386,7 @@ class TelegramClient(ChatHandlerFactory):
                         "type": "group" | "supergroup", "id": chat
                     }}} if not self.__disptacher.is_bound(str(chat)) \
                             and text.startswith("/jabagram"):
-                        await self.__bridge_command(chat, text)
+                        await self.__bridge_command(str(chat), text)
                     case {"edited_message": {"chat": {
                         "type": "group" | "supergroup", "id": chat
                     }} as message} if self.__disptacher.is_bound(str(chat)):
