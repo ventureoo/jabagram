@@ -112,10 +112,10 @@ class TelegramApi():
                             return results['result']
 
                         description = results.get('description')
-                        params = results.get("parameters")
+                        paramaters = results.get("parameters")
 
-                        if response.status == 429 and params:
-                            timeout = params.get("retry_after")
+                        if response.status == 429 and paramaters:
+                            timeout = paramaters.get("retry_after")
                             self.__logger.warning(
                                 "Too many requests, request "
                                 "will be executed again in: %d secs",
