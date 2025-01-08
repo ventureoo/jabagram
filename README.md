@@ -190,7 +190,6 @@ Telegram sender nicknames for you.
 Licensed under GPL 3.0. If you'd like to help with improvements or fixes to this shitty code, I'd be happy to consider your patches ;D
 
 ## Feedback
-If you have any issues with how the bridge works/is configured, feel free to contact me:
 
-- Telegram: t.me/ventureoo
-- XMPP: ventureo@5222.de
+If you have any issues with how the bridge works/is configured, please use
+"Discussions" tab on the GitHub.
