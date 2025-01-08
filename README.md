@@ -23,16 +23,35 @@ This bridge has the following features and supports all the basic capabilities:
 - [x] Round-trip message edit changes
 - [x] Forwards events between bridged chats, such as mebmers join/exit, etc.
 
-## Deploy
 
-For the bridge to work, you need to use Python 3.10+, and install all the
-dependencies specified in the ``requirements.txt``(slixmpp, aiohttp) file:
+## Installation
+
+### With pip
+
+Jabagram stable releases can now be installed via pip. This is the recommended
+way if you don't want to use Docker or unable to install jabagram dependencies
+to your system paths.
+
+```
+pip install --user jabagram
+```
+
+You can also install in a virtual environment if you don't want to clutter your
+system with all the jabagram dependencies.
+
+### Manual
+
+When manually installing to make the bridge work, you need to use Python 3.10+,
+and install all the dependencies specified in the ``requirements.txt``(slixmpp,
+aiohttp) file:
 
 ```
 git clone https://github.com/ventureoo/jabagram
 cd jabagram
 pip install -r requirements.txt
 ```
+
+## Deploy
 
 Before you start the bridge, you need to do some basic configuration. An
 example configuration is given in the form of the file ``config.example.ini``.
