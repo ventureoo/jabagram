@@ -53,7 +53,7 @@ class TelegramApiError(Exception):
 class TelegramApi():
     def __init__(self, token):
         self.__token = token
-        self.__session = aiohttp.ClientSession()
+        self.__session = None
         self.__logger = logging.getLogger(__class__.__name__)
 
     async def __aenter__(self) -> "TelegramApi":
@@ -75,9 +75,13 @@ class TelegramApi():
         await self.close()
 
     async def close(self) -> None:
-        await self.__session.close()
+        if self.__session:
+            await self.__session.close()
 
     def __getattr__(self, method):
+        if not self.__session:
+            self.__session = aiohttp.ClientSession()
+
         async def wrapper(*file, **kwargs):
             url = f"https://api.telegram.org/bot{self.__token}/{method}"
             params = {
