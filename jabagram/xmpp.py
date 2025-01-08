@@ -249,7 +249,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
                 if _safe_get(line, 2) == ">":
                     continue
 
-                line = line.replace("> ", "")
+                line = line.replace("> ", "").strip()
 
                 # Attempt to detect a replies format of some mobile clients
                 # that add time and sender name of the message sent
