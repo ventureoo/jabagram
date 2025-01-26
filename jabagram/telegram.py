@@ -163,11 +163,11 @@ class TelegramChatHandler(ChatHandler):
         self.__api = api
         self.__messages = messages
 
-    def __make_bold_entity(self, text: str, offset: int):
+    def __make_bold_sender_name(self, text: str):
         message_entities = [
             {
                 "type": "bold",
-                "offset": offset,
+                "offset": 0,
                 "length": len(text)
             }
         ]
@@ -177,7 +177,7 @@ class TelegramChatHandler(ChatHandler):
         params = {
             "text": f"{message.sender}: {message.content}",
             "chat_id": self.address,
-            "entities": self.__make_bold_entity(message.sender, 0)
+            "entities": self.__make_bold_sender_name(message.sender)
         }
 
         if message.reply:
@@ -236,8 +236,8 @@ class TelegramChatHandler(ChatHandler):
                     params = {
                         "chat_id": self.address,
                         "caption": f"{attachment.sender}: ",
-                        "caption_entities": self.__make_bold_entity(
-                            attachment.sender, offset=0
+                        "caption_entities": self.__make_bold_sender_name(
+                            attachment.sender
                         )
                     }
 
@@ -297,7 +297,7 @@ class TelegramChatHandler(ChatHandler):
             "chat_id": self.address,
             "text": f"{message.sender}: {message.content}",
             "message_id": telegram_id,
-            "entities": self.__make_bold_entity(message.sender, 0)
+            "entities": self.__make_bold_sender_name(message.sender )
         }
 
         if message.reply:
@@ -305,14 +305,23 @@ class TelegramChatHandler(ChatHandler):
             if self.__cache.reply_map.get(message.reply):
                 params["text"] = f"{message.sender}: {message.content}"
             else:
-                formatted_reply = "> " + message.reply.replace("\n", "\n> ")
                 params["text"] = (
-                    f"{formatted_reply}\n"
+                    f"{message.reply}\n"
                     f"{message.sender}: {message.content}"
                 )
-                params["entities"] = self.__make_bold_entity(
-                    message.sender, len(formatted_reply) + 1
-                )
+                format = [
+                    {
+                        "type": "blockquote",
+                        "offset": 0,
+                        "length": len(message.reply)
+                    },
+                    {
+                        "type": "bold",
+                        "offset": len(message.reply) + 1,
+                        "length": len(message.sender)
+                    }
+                ]
+                params["entities"] = dumps(format)
         try:
             response = await self.__api.editMessageText(**params)
             self.__cache.reply_map.add(message.content, response['message_id'])
