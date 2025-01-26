@@ -382,22 +382,45 @@ class TelegramClient(ChatHandlerFactory):
 
             for update in updates:
                 match update:
-                    case {"message": {"chat": {
-                        "type": "group" | "supergroup", "id": chat
-                    }} as message} if self.__disptacher.is_bound(str(chat)):
-                        await self.__process_message(message)
-                    case {"message": {"text": text, "chat": {
-                        "type": "group" | "supergroup", "id": chat
-                    }}} if not self.__disptacher.is_bound(str(chat)) \
+                    case {
+                        "message": {
+                            "chat": {
+                                "type": "group" | "supergroup",
+                                "id": chat
+                            },
+                        } as message
+                    } if self.__disptacher.is_bound(str(chat)):
+                        if not message.get("is_topic_message"):
+                            await self.__process_message(message)
+                    case {
+                        "message": {
+                            "text": text,
+                            "chat": {
+                                "type": "group" | "supergroup",
+                                "id": chat
+                            },
+                        }
+                    } if not self.__disptacher.is_bound(str(chat)) \
                             and text.startswith("/jabagram"):
                         await self.__bridge_command(str(chat), text)
-                    case {"edited_message": {"chat": {
-                        "type": "group" | "supergroup", "id": chat
-                    }} as message} if self.__disptacher.is_bound(str(chat)):
-                        await self.__process_message(message, edit=True)
-                    case {"my_chat_member": {"chat": {
-                        "type": "group" | "supergroup", "id": chat
-                    }} as member} if self.__disptacher.is_bound(str(chat)):
+                    case {
+                        "edited_message": {
+                            "chat": {
+                                "type": "group" | "supergroup",
+                                "id": chat
+                            },
+                        } as message
+                    } if self.__disptacher.is_bound(str(chat)):
+                        if not message.get("is_topic_message"):
+                            await self.__process_message(message, edit=True)
+                    case {
+                        "my_chat_member": {
+                            "chat": {
+                                "type": "group" | "supergroup",
+                                "id": chat
+                            }
+                        } as member
+                    } if self.__disptacher.is_bound(str(chat)):
                         await self.__process_kick_event(member)
 
             params["offset"] = updates[len(updates) - 1]['update_id'] + 1
