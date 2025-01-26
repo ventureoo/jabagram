@@ -186,14 +186,23 @@ class TelegramChatHandler(ChatHandler):
                 params["text"] = f"{message.sender}: {message.content}"
                 params["reply_to_message_id"] = telegram_id
             else:
-                formatted_reply = "> " + message.reply.replace("\n", "\n> ")
                 params["text"] = (
-                    f"{formatted_reply}\n"
+                    f"{message.reply}\n"
                     f"{message.sender}: {message.content}"
                 )
-                params["entities"] = self.__make_bold_entity(
-                    message.sender, len(formatted_reply) + 1
-                )
+                format = [
+                    {
+                        "type": "blockquote",
+                        "offset": 0,
+                        "length": len(message.reply)
+                    },
+                    {
+                        "type": "bold",
+                        "offset": len(message.reply) + 1,
+                        "length": len(message.sender)
+                    }
+                ]
+                params["entities"] = dumps(format)
 
         try:
             response = await self.__api.sendMessage(**params)
