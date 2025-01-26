@@ -24,7 +24,7 @@ import logging
 import mimetypes
 
 import aiohttp
-from aiohttp import ClientConnectionError, ClientResponseError
+from aiohttp import ClientConnectionError, ClientResponseError, ClientSession
 from jabagram.messages import Messages
 from slixmpp.jid import InvalidJID, JID
 
@@ -53,7 +53,7 @@ class TelegramApiError(Exception):
 class TelegramApi():
     def __init__(self, token):
         self.__token = token
-        self.__session: aiohttp.client.ClientSession | None = None
+        self.__session: ClientSession | None = None
         self.__logger = logging.getLogger(__class__.__name__)
 
     async def __aenter__(self) -> "TelegramApi":
@@ -78,9 +78,9 @@ class TelegramApi():
         if self.__session:
             await self.__session.close()
 
-    async def __get_session(self) -> aiohttp.client.ClientSession:
+    async def __get_session(self) -> ClientSession:
         if not self.__session or self.__session.closed:
-            self.__session = aiohttp.ClientSession()
+            self.__session = ClientSession()
 
         return self.__session
 
@@ -297,7 +297,7 @@ class TelegramChatHandler(ChatHandler):
             "chat_id": self.address,
             "text": f"{message.sender}: {message.content}",
             "message_id": telegram_id,
-            "entities": self.__make_bold_sender_name(message.sender )
+            "entities": self.__make_bold_sender_name(message.sender)
         }
 
         if message.reply:
