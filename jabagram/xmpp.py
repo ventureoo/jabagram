@@ -245,6 +245,10 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
         for line in message.splitlines():
             if _safe_get(line, 0) == ">":
+                # Ignore brackets not followed by space
+                if _safe_get(line, 1) != " ":
+                    continue
+
                 # Ignore nested replies
                 if _safe_get(line, 2) == ">":
                     continue
