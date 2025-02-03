@@ -21,7 +21,6 @@ from datetime import datetime
 from functools import lru_cache
 import logging
 import stringprep
-import unicodedata
 import re
 from unidecode import unidecode
 
@@ -36,7 +35,15 @@ from slixmpp.plugins.xep_0363.http_upload import HTTPError
 from .cache import Cache, StickerCache
 from .database import ChatService
 from .dispatcher import MessageDispatcher
-from .model import Attachment, ChatHandler, ChatHandlerFactory, Event, Message, Sticker
+from .model import (
+    Attachment,
+    ChatHandler,
+    ChatHandlerFactory,
+    Event,
+    EventOrigin,
+    Message,
+    Sticker
+)
 
 # XMPP does not support all available characters for resourcepart in JIDs, so
 # we need to filter a range of characters.
@@ -185,6 +192,9 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         message_id = message['id']
         muc = message['mucroom']
         text = message['body']
+        origin = EventOrigin(
+            id=message_id
+        )
 
         if not self.__dispatcher.is_bound(muc):
             return
@@ -201,7 +211,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
             fname = url.split("/")[-1]
             attachment = Attachment(
-                event_id=message_id,
+                origin=origin,
                 address=muc,
                 sender=sender,
                 url_callback=url_callback,
@@ -211,29 +221,31 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             )
             await self.__dispatcher.send(attachment)
         else:
-            params = {
-                "address": muc,
-                "event_id": message_id,
-                "content": text,
-                "sender": sender,
-                "edit": False,
-                "reply": None
-            }
+            content = text
+            is_edit = False
 
             if message['replace']['id']:
-                params["event_id"] = message['replace']['id']
-                params["edit"] = True
+                origin = EventOrigin(
+                    id=message['replace']['id']
+                )
+                is_edit = True
 
             reply, body = self.__parse_reply(text)
 
-            if reply:
-                params["content"] = body
-                params["reply"] = reply
+            if reply and body:
+                content = body
 
-            message = Message(**params)
+            message = Message(
+                address=muc,
+                content=content,
+                reply=reply,
+                edit=is_edit,
+                sender=sender,
+                origin=origin
+            )
             await self.__dispatcher.send(message)
 
-    def __parse_reply(self, message: str) -> tuple[str, str]:
+    def __parse_reply(self, message: str) -> tuple[str | None, str | None]:
         def _safe_get(line: str, index: int):
             try:
                 return line[index]
@@ -297,7 +309,10 @@ class XmppRoomHandler(ChatHandler):
         if nick == self.__last_sender:
             self.__nick_change_event.set()
 
-    async def __change_nick(self, sender: str):
+    async def __change_nick(self, sender: str, topic_name: str | None):
+        if topic_name:
+            sender += " [" + topic_name + "]"
+
         sender = self.__validate_name(sender) + " (Telegram)"
 
         if sender == self.__last_sender:
@@ -315,7 +330,7 @@ class XmppRoomHandler(ChatHandler):
         await asyncio.wait_for(self.__nick_change_event.wait(), 15)
 
     async def send_message(self, message: Message) -> None:
-        self.__logger.info("Sending message with id: %s", message.event_id)
+        self.__logger.info("Sending message with id: %s", message.origin.id)
 
         params = {
             "mto": self.__muc,
@@ -327,10 +342,10 @@ class XmppRoomHandler(ChatHandler):
             reply_body = "> " + message.reply.replace("\n", "\n> ")
             params["mbody"] = f"{reply_body}\n{message.content}"
 
-        await self.__change_nick(message.sender)
+        await self.__change_nick(message.sender, message.origin.topic_name)
         msg = self.__client.make_message(**params)
-        self.__cache.reply_map.add(message.content, message.event_id)
-        self.__cache.message_ids.add(message.event_id, msg['id'])
+        self.__cache.reply_map.add(message.content, message.origin)
+        self.__cache.message_ids.add(message.origin.id, msg['id'])
         msg.send()
 
     async def send_attachment(self, attachment: Attachment) -> None:
@@ -343,7 +358,7 @@ class XmppRoomHandler(ChatHandler):
             "Sending attachment with name: %s", attachment.content
         )
 
-        await self.__change_nick(attachment.sender)
+        await self.__change_nick(attachment.sender, attachment.origin.topic_name)
 
         if attachment.reply:
             reply_body = "> " + attachment.reply.replace("\n", "\n> ")
@@ -434,7 +449,7 @@ class XmppRoomHandler(ChatHandler):
                 "Sticker %s was taken from the cache", sticker.file_id
             )
 
-        await self.__change_nick(sticker.sender)
+        await self.__change_nick(sticker.sender, sticker.origin.topic_name)
 
         html = (
             f'<body xmlns="http://www.w3.org/1999/xhtml">'
@@ -450,11 +465,12 @@ class XmppRoomHandler(ChatHandler):
         message.send()
 
     async def edit_message(self, message: Message) -> None:
-        stanza = self.__cache.message_ids.get(message.event_id)
+        stanza = self.__cache.message_ids.get(message.origin.id)
 
         if not stanza:
             self.__logger.info(
-                "Failed to found stanza for event: %s", message.event_id
+                "Failed to found stanza for event: %s",
+                message.origin.id
             )
             return
 
@@ -468,13 +484,13 @@ class XmppRoomHandler(ChatHandler):
             reply_body = "> " + message.reply.replace("\n", "\n> ")
             params["mbody"] = f"{reply_body}\n{message.content}"
 
-        await self.__change_nick(message.sender)
+        await self.__change_nick(message.sender, message.origin.topic_name)
         msg = self.__client.make_message(**params)
         msg['replace']['id'] = stanza
         msg.send()
 
     async def send_event(self, event: Event) -> None:
-        await self.__change_nick(BRIDGE_DEFAULT_NAME)
+        await self.__change_nick(BRIDGE_DEFAULT_NAME, None)
         self.__client.send_message(
             mto=self.__muc,
             mbody=event.content,

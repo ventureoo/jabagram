@@ -25,7 +25,7 @@ class SimpleLRUCache():
         self.__map = OrderedDict()
         self.__logger = logging.getLogger("Cache")
 
-    def get(self, key: str) -> str | None:
+    def get(self, key: str):
         if key in self.__map.keys():
             self.__map.move_to_end(key)
             return self.__map[key]
@@ -33,7 +33,7 @@ class SimpleLRUCache():
         self.__logger.debug("Not found key in cache: %s", key)
         return None
 
-    def add(self, key: str, value: str) -> None:
+    def add(self, key: str, value) -> None:
         self.__logger.debug("Add pair: %s - %s", key, value)
         self.__map[key] = value
         self.__map.move_to_end(key)
@@ -72,6 +72,42 @@ class StickerCache():
                 self.__logger.info("Cache miss for: %s", file_id)
         except Error as e:
             self.__logger.error("Can not get sticker: %s", e)
+
+class TopicNameCache():
+    def __init__(self, path):
+        self.__path = path
+        self.__logger = logging.getLogger(self.__class__.__name__)
+
+    def add(self, chat_id, topic_id, topic_name) -> None:
+        try:
+            with connect(self.__path) as con:
+                cursor = con.cursor()
+                cursor.execute(
+                    "INSERT INTO topics(chat_id, topic_id, topic_name) VALUES (?, ?, ?)",
+                    (chat_id, topic_id, topic_name)
+                )
+                con.commit()
+        except Error as e:
+            self.__logger.error("Can not add topic name: %s", e)
+
+    def get(self, chat_id, topic_id) -> str | None:
+        try:
+            with connect(self.__path) as con:
+                cursor = con.cursor()
+                cursor.execute(
+                    "SELECT topic_name FROM topics WHERE chat_id = ? and topic_id = ?",
+                    (chat_id, topic_id, )
+                )
+                row = cursor.fetchone()
+
+                if row:
+                    return row[0]
+
+                self.__logger.info(
+                    "Cache miss for: %s, %s", chat_id, topic_id
+                )
+        except Error as e:
+            self.__logger.error("Can not get topic name: %s", e)
 
 
 class Cache():

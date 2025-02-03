@@ -18,7 +18,7 @@
 
 import asyncio
 from json import dumps
-from typing import Optional, Type
+from typing import Any, Optional, Type
 from types import TracebackType
 import logging
 import mimetypes
@@ -27,8 +27,9 @@ import aiohttp
 from aiohttp import ClientConnectionError, ClientResponseError, ClientSession
 from jabagram.messages import Messages
 from slixmpp.jid import InvalidJID, JID
+from datetime import datetime
 
-from .cache import Cache
+from .cache import Cache, TopicNameCache
 from .database import ChatService
 from .dispatcher import MessageDispatcher
 from .model import (
@@ -36,11 +37,23 @@ from .model import (
     ChatHandler,
     ChatHandlerFactory,
     Event,
+    EventOrigin,
     Message,
     Sticker,
     TelegramAttachment,
     UnbridgeEvent,
 )
+
+
+# When an XMPP user replies to a message coming from a side topic, all of his
+# further simple messages (not replies) are forwarded to that Telegram chat
+# topic. This constant specifies the time after which simple messages will be
+# forwarded to the main chat again.
+TELEGRAM_TOPIC_TIMEOUT = 10
+
+
+def is_time_left(time: datetime, value: int) -> float:
+    return (datetime.now() - time).total_seconds() < value
 
 
 class TelegramApiError(Exception):
@@ -148,208 +161,26 @@ class TelegramApi():
 
         return wrapper
 
+class TopicTimeoutEntry():
+    def __init__(self, topic_id: int, time: datetime):
+        self.__topic_id = topic_id
+        self.__time = time
 
-class TelegramChatHandler(ChatHandler):
-    def __init__(
-        self,
-        address: str,
-        api: TelegramApi,
-        cache: Cache,
-        messages: Messages
-    ) -> None:
-        super().__init__(address)
-        self.__cache = cache
-        self.__logger = logging.getLogger(f"TelegramChatHandler ({address})")
-        self.__api = api
-        self.__messages = messages
+    @property
+    def time(self):
+        return self.__time
 
-    def __make_bold_sender_name(self, text: str):
-        message_entities = [
-            {
-                "type": "bold",
-                "offset": 0,
-                "length": len(text)
-            }
-        ]
-        return dumps(message_entities)
+    @time.setter
+    def time(self, time: datetime):
+        self.__time = time
 
-    async def send_message(self, message: Message) -> None:
-        params = {
-            "text": f"{message.sender}: {message.content}",
-            "chat_id": self.address,
-            "entities": self.__make_bold_sender_name(message.sender)
-        }
+    @property
+    def topic_id(self):
+        return self.__topic_id
 
-        if message.reply:
-            telegram_id = self.__cache.reply_map.get(message.reply)
-            if telegram_id:
-                params["text"] = f"{message.sender}: {message.content}"
-                params["reply_to_message_id"] = telegram_id
-            else:
-                params["text"] = (
-                    f"{message.reply}\n"
-                    f"{message.sender}: {message.content}"
-                )
-                format = [
-                    {
-                        "type": "blockquote",
-                        "offset": 0,
-                        "length": len(message.reply)
-                    },
-                    {
-                        "type": "bold",
-                        "offset": len(message.reply) + 1,
-                        "length": len(message.sender)
-                    }
-                ]
-                params["entities"] = dumps(format)
-
-        try:
-            response = await self.__api.sendMessage(**params)
-            self.__cache.reply_map.add(message.content, response['message_id'])
-            self.__cache.message_ids.add(
-                message.event_id, response['message_id']
-            )
-        except TelegramApiError as error:
-            self.__logger.error("Error sending a message: %s", error)
-
-    async def send_attachment(self, attachment: Attachment) -> None:
-        url = await attachment.url_callback()
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    if resp.status not in (200, 201):
-                        self.__logger.error(
-                            "Error while getting %s file: %d", url, resp.status
-                        )
-                        return
-
-                    mime = resp.content_type
-                    form_data = aiohttp.FormData()
-                    form_data.add_field(
-                        'file', resp.content, filename=attachment.content,
-                        content_type=mime
-                    )
-
-                    method = self.__api.sendDocument
-                    params = {
-                        "chat_id": self.address,
-                        "caption": f"{attachment.sender}: ",
-                        "caption_entities": self.__make_bold_sender_name(
-                            attachment.sender
-                        )
-                    }
-
-                    if mime == "image/gif":
-                        method = self.__api.sendAnimation
-                        params['animation'] = "attach://file"
-                    elif mime.startswith("image"):
-                        method = self.__api.sendPhoto
-                        params['photo'] = "attach://file"
-                    elif mime.startswith("video"):
-                        method = self.__api.sendVideo
-                        params['video'] = "attach://file"
-                    elif mime.startswith("audio"):
-                        method = self.__api.sendAudio
-                        params['audio'] = "attach://file"
-                    else:
-                        params['document'] = "attach://file"
-
-                    try:
-                        message = await method(form_data, **params)
-                        self.__cache.reply_map.add(
-                            attachment.content, message['message_id'])
-                    except TelegramApiError as error:
-                        try:
-                            await self.__api.sendMessage(
-                                chat_id=self.address,
-                                text=(
-                                    "Couldn't transfer file"
-                                    f"{attachment.content} "
-                                    f"from {attachment.sender}"
-                                )
-                            )
-                        except TelegramApiError as send_message_error:
-                            self.__logger.error(
-                                "Failed to send error message: %s",
-                                send_message_error
-                            )
-
-                        self.__logger.error(
-                            "Failed to send file to telegram: %s", error
-                        )
-        except ClientConnectionError as error:
-            self.__logger.error("Failed to upload attachment: %s", error)
-
-    async def edit_message(self, message: Message) -> None:
-        telegram_id: str | None = self.__cache.message_ids.get(
-            message.event_id)
-
-        if not telegram_id:
-            self.__logger.info(
-                "Failed to found telegram message id for event: %d",
-                message.event_id
-            )
-            return
-
-        params = {
-            "chat_id": self.address,
-            "text": f"{message.sender}: {message.content}",
-            "message_id": telegram_id,
-            "entities": self.__make_bold_sender_name(message.sender)
-        }
-
-        if message.reply:
-            # Be sure that replies to messages was sent as native in Telegram
-            if self.__cache.reply_map.get(message.reply):
-                params["text"] = f"{message.sender}: {message.content}"
-            else:
-                params["text"] = (
-                    f"{message.reply}\n"
-                    f"{message.sender}: {message.content}"
-                )
-                format = [
-                    {
-                        "type": "blockquote",
-                        "offset": 0,
-                        "length": len(message.reply)
-                    },
-                    {
-                        "type": "bold",
-                        "offset": len(message.reply) + 1,
-                        "length": len(message.sender)
-                    }
-                ]
-                params["entities"] = dumps(format)
-        try:
-            response = await self.__api.editMessageText(**params)
-            self.__cache.reply_map.add(message.content, response['message_id'])
-        except TelegramApiError as error:
-            self.__logger.error("Error while editing a message: %s", error)
-
-    async def send_event(self, event: Event) -> None:
-        try:
-            await self.__api.sendMessage(
-                chat_id=self.address,
-                text=event.content
-            )
-        except TelegramApiError as error:
-            self.__logger.error(
-                "Failed to send event: %s", error
-            )
-
-    async def unbridge(self) -> None:
-        try:
-            await self.__api.sendMessage(
-                chat_id=self.address,
-                text=self.__messages.unbridge_telegram
-            )
-            await self.__api.leaveChat(chat_id=self.address)
-        except TelegramApiError as error:
-            self.__logger.error(
-                "Failed to unbridge chat: %s", error
-            )
+    @topic_id.setter
+    def topic_id(self, topic_id: int):
+        self.__topic_id = topic_id
 
 
 class TelegramClient(ChatHandlerFactory):
@@ -359,6 +190,7 @@ class TelegramClient(ChatHandlerFactory):
         jid: str,
         service: ChatService,
         dispatcher: MessageDispatcher,
+        topic_name_cache: TopicNameCache,
         messages: Messages
     ) -> None:
         self.__api: TelegramApi = TelegramApi(token)
@@ -369,6 +201,7 @@ class TelegramClient(ChatHandlerFactory):
         self.__service: ChatService = service
         self.__service.register_factory(self)
         self.__messages = messages
+        self.__topic_name_cache = topic_name_cache
 
     async def create_handler(
         self,
@@ -377,10 +210,11 @@ class TelegramClient(ChatHandlerFactory):
         cache: Cache,
     ) -> None:
         handler = TelegramChatHandler(
-            address,
-            self.__api,
-            cache,
-            self.__messages
+            address=address,
+            client=self,
+            cache=cache,
+            topic_name_cache=self.__topic_name_cache,
+            messages=self.__messages
         )
         self.__disptacher.add_handler(muc, handler)
 
@@ -408,8 +242,7 @@ class TelegramClient(ChatHandlerFactory):
                             },
                         } as message
                     } if self.__disptacher.is_bound(str(chat)):
-                        if not message.get("is_topic_message"):
-                            await self.__process_message(message)
+                        await self.__process_message(message)
                     case {
                         "message": {
                             "text": text,
@@ -429,8 +262,7 @@ class TelegramClient(ChatHandlerFactory):
                             },
                         } as message
                     } if self.__disptacher.is_bound(str(chat)):
-                        if not message.get("is_topic_message"):
-                            await self.__process_message(message, edit=True)
+                        await self.__process_message(message, edit=True)
                     case {
                         "my_chat_member": {
                             "chat": {
@@ -566,13 +398,13 @@ class TelegramClient(ChatHandlerFactory):
     async def __process_message(self, raw_message: dict, edit=False) -> None:
         chat_id = str(raw_message['chat']['id'])
         sender: str = self.__get_full_name(raw_message['from'])
-        message_id = str(raw_message['message_id'])
         text: str | None = raw_message.get(
             "text") or raw_message.get("caption")
         reply: str | None = self.__get_reply(raw_message)
         attachment: TelegramAttachment | None = self.__extract_attachment(
             sender, raw_message
         )
+        origin: EventOrigin = self.extract_message_origin(raw_message)
 
         if attachment:
             async def url_callback():
@@ -593,7 +425,7 @@ class TelegramClient(ChatHandlerFactory):
             if attachment.is_cacheable:
                 await self.__disptacher.send(
                     Sticker(
-                        event_id=message_id,
+                        origin=origin,
                         content=attachment.fname,
                         address=chat_id,
                         sender=sender,
@@ -606,7 +438,7 @@ class TelegramClient(ChatHandlerFactory):
             else:
                 await self.__disptacher.send(
                     Attachment(
-                        event_id=message_id,
+                        origin=origin,
                         address=chat_id,
                         sender=sender,
                         content=attachment.fname,
@@ -622,7 +454,7 @@ class TelegramClient(ChatHandlerFactory):
         if text:
             await self.__disptacher.send(
                 Message(
-                    event_id=message_id,
+                    origin=origin,
                     address=chat_id,
                     content=text,
                     sender=sender,
@@ -644,3 +476,287 @@ class TelegramClient(ChatHandlerFactory):
             name = name + " " + user['last_name']
 
         return name
+
+    def extract_message_origin(
+        self,
+        message: dict
+    ) -> EventOrigin:
+        message_id = message['message_id']
+        chat_id = str(message['chat']['id'])
+        origin = EventOrigin(id=message_id)
+        topic_id = message.get("message_thread_id")
+
+        if topic_id:
+            topic_name = self.__topic_name_cache.get(chat_id, topic_id)
+
+            if topic_name:
+                origin = EventOrigin(
+                    id=message_id,
+                    topic_id=topic_id,
+                    topic_name=topic_name
+                )
+            else:
+                reply_message = message.get('reply_to_message')
+                if reply_message:
+                    topic = reply_message.get("forum_topic_created")
+                    if topic:
+                        self.__topic_name_cache.add(
+                            chat_id, topic_id, topic.get("name")
+                        )
+                        origin = EventOrigin(
+                            id=message_id,
+                            topic_id=topic_id,
+                            topic_name=topic.get("name")
+                        )
+                    else:
+                        if reply_message.get("is_topic_message"):
+                            origin = EventOrigin(
+                                id=message_id,
+                                topic_id=topic_id,
+                                topic_name="Unknown"
+                            )
+
+        return origin
+
+    def get_api(self) -> TelegramApi:
+        return self.__api
+
+
+class TelegramChatHandler(ChatHandler):
+    def __init__(
+        self,
+        address: str,
+        client: TelegramClient,
+        cache: Cache,
+        topic_name_cache: TopicNameCache,
+        messages: Messages
+    ) -> None:
+        super().__init__(address)
+        self.__cache = cache
+        self.__logger = logging.getLogger(f"TelegramChatHandler ({address})")
+        self.__client = client
+        self.__api = client.get_api()
+        self.__messages = messages
+        self.__residence_map: dict[str, TopicTimeoutEntry] = {}
+
+    def __make_bold_sender_name(self, text: str):
+        message_entities = [
+            {
+                "type": "bold",
+                "offset": 0,
+                "length": len(text)
+            }
+        ]
+        return dumps(message_entities)
+
+    async def send_message(self, message: Message) -> None:
+        params: dict[str, Any] = {
+            "text": f"{message.sender}: {message.content}",
+            "chat_id": self.address,
+            "entities": self.__make_bold_sender_name(message.sender)
+        }
+
+        if message.reply:
+            origin: EventOrigin | None = self.__cache.reply_map.get(message.reply)
+            if origin:
+                params["text"] = f"{message.sender}: {message.content}"
+                params["reply_to_message_id"] = origin.id
+
+                entry: TopicTimeoutEntry | None = self.__residence_map.get(
+                    message.sender
+                )
+
+                if origin.thread_id:
+                    params["message_thread_id"] = origin.thread_id
+                    if entry:
+                        entry.time = datetime.now()
+                        entry.topic_id = origin.thread_id
+                else:
+                    if entry and is_time_left(entry.time, TELEGRAM_TOPIC_TIMEOUT):
+                        params["message_thread_id"] = entry.topic_id
+                        entry.time = datetime.now()
+            else:
+                params["text"] = (
+                    f"{message.reply}\n"
+                    f"{message.sender}: {message.content}"
+                )
+                format = [
+                    {
+                        "type": "blockquote",
+                        "offset": 0,
+                        "length": len(message.reply)
+                    },
+                    {
+                        "type": "bold",
+                        "offset": len(message.reply) + 1,
+                        "length": len(message.sender)
+                    }
+                ]
+                params["entities"] = dumps(format)
+        else:
+            entry: TopicTimeoutEntry | None = self.__residence_map.get(
+                message.sender
+            )
+            if entry and is_time_left(entry.time, TELEGRAM_TOPIC_TIMEOUT):
+                params["message_thread_id"] = entry.topic_id
+                entry.time = datetime.now()
+
+        try:
+            response = await self.__api.sendMessage(**params)
+            self.__cache.reply_map.add(
+                message.content, self.__client.extract_message_origin(response)
+            )
+            self.__cache.message_ids.add(
+                message.origin.id, response['message_id']
+            )
+        except TelegramApiError as error:
+            self.__logger.error("Error sending a message: %s", error)
+
+    async def send_attachment(self, attachment: Attachment) -> None:
+        url = await attachment.url_callback()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status not in (200, 201):
+                        self.__logger.error(
+                            "Error while getting %s file: %d", url, resp.status
+                        )
+                        return
+
+                    mime = resp.content_type
+                    form_data = aiohttp.FormData()
+                    form_data.add_field(
+                        'file', resp.content, filename=attachment.content,
+                        content_type=mime
+                    )
+
+                    method = self.__api.sendDocument
+                    params: dict[str, Any] = {
+                        "chat_id": self.address,
+                        "caption": f"{attachment.sender}: ",
+                        "caption_entities": self.__make_bold_sender_name(
+                            attachment.sender
+                        ),
+                    }
+
+                    entry: TopicTimeoutEntry | None = self.__residence_map.get(
+                        attachment.sender
+                    )
+                    if entry and is_time_left(
+                        entry.time, TELEGRAM_TOPIC_TIMEOUT
+                    ):
+                        params["message_thread_id"] = entry.topic_id
+                        entry.time = datetime.now()
+
+                    if mime == "image/gif":
+                        method = self.__api.sendAnimation
+                        params['animation'] = "attach://file"
+                    elif mime.startswith("image"):
+                        method = self.__api.sendPhoto
+                        params['photo'] = "attach://file"
+                    elif mime.startswith("video"):
+                        method = self.__api.sendVideo
+                        params['video'] = "attach://file"
+                    elif mime.startswith("audio"):
+                        method = self.__api.sendAudio
+                        params['audio'] = "attach://file"
+                    else:
+                        params['document'] = "attach://file"
+
+                    try:
+                        response = await method(form_data, **params)
+                        origin = self.__client.extract_message_origin(response)
+                        self.__cache.reply_map.add(attachment.content, origin)
+                    except TelegramApiError as error:
+                        try:
+                            await self.__api.sendMessage(
+                                chat_id=self.address,
+                                text=(
+                                    "Couldn't transfer file"
+                                    f"{attachment.content} "
+                                    f"from {attachment.sender}"
+                                )
+                            )
+                        except TelegramApiError as send_message_error:
+                            self.__logger.error(
+                                "Failed to send error message: %s",
+                                send_message_error
+                            )
+
+                        self.__logger.error(
+                            "Failed to send file to telegram: %s", error
+                        )
+        except ClientConnectionError as error:
+            self.__logger.error("Failed to upload attachment: %s", error)
+
+    async def edit_message(self, message: Message) -> None:
+        telegram_id: str | None = self.__cache.message_ids.get(
+            message.origin.id
+        )
+
+        if not telegram_id:
+            self.__logger.info(
+                "Failed to found telegram message id for event: %d",
+                message.origin.id
+            )
+            return
+
+        params = {
+            "chat_id": self.address,
+            "text": f"{message.sender}: {message.content}",
+            "message_id": telegram_id,
+            "entities": self.__make_bold_sender_name(message.sender)
+        }
+
+        if message.reply:
+            # Be sure that replies to messages was sent as native in Telegram
+            if self.__cache.reply_map.get(message.reply):
+                params["text"] = f"{message.sender}: {message.content}"
+            else:
+                params["text"] = (
+                    f"{message.reply}\n"
+                    f"{message.sender}: {message.content}"
+                )
+                format = [
+                    {
+                        "type": "blockquote",
+                        "offset": 0,
+                        "length": len(message.reply)
+                    },
+                    {
+                        "type": "bold",
+                        "offset": len(message.reply) + 1,
+                        "length": len(message.sender)
+                    }
+                ]
+                params["entities"] = dumps(format)
+        try:
+            response = await self.__api.editMessageText(**params)
+            origin = self.__client.extract_message_origin(response)
+            self.__cache.reply_map.add(message.content, origin)
+        except TelegramApiError as error:
+            self.__logger.error("Error while editing a message: %s", error)
+
+    async def send_event(self, event: Event) -> None:
+        try:
+            await self.__api.sendMessage(
+                chat_id=self.address,
+                text=event.content
+            )
+        except TelegramApiError as error:
+            self.__logger.error(
+                "Failed to send event: %s", error
+            )
+
+    async def unbridge(self) -> None:
+        try:
+            await self.__api.sendMessage(
+                chat_id=self.address,
+                text=self.__messages.unbridge_telegram
+            )
+            await self.__api.leaveChat(chat_id=self.address)
+        except TelegramApiError as error:
+            self.__logger.error(
+                "Failed to unbridge chat: %s", error
+            )

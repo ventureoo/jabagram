@@ -24,7 +24,7 @@ from os import path
 
 from jabagram.messages import Messages
 
-from .cache import StickerCache
+from .cache import StickerCache, TopicNameCache
 from .database import ChatService, Database
 from .dispatcher import MessageDispatcher
 from .telegram import TelegramClient
@@ -81,6 +81,7 @@ def main():
         messages.load()
         database = Database(args.data)
         sticker_cache = StickerCache(args.data)
+        topic_name_cache = TopicNameCache(args.data)
 
         if not database.create():
             logger.error("Error when working with the database, interrupt...")
@@ -98,6 +99,7 @@ def main():
             config.get("xmpp", "login"),
             service,
             dispatcher,
+            topic_name_cache,
             messages
         )
         xmpp = XmppClient(

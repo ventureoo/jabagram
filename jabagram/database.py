@@ -39,8 +39,10 @@ class Database():
                 cursor.execute(
                     "CREATE TABLE IF NOT EXISTS stickers(file_id PRIMARY KEY, xmpp_url NOT NULL)"
                 )
+                cursor.execute(
+                    "CREATE TABLE IF NOT EXISTS topics(chat_id, topic_id, topic_name NOT NULL)"
+                )
                 con.commit()
-
             return True
         except Error as e:
             self.__logger.error("Can't initialize the database: %s", e)
