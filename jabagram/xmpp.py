@@ -358,16 +358,6 @@ class XmppRoomHandler(ChatHandler):
             "Sending attachment with name: %s", attachment.content
         )
 
-        await self.__change_nick(attachment.sender, attachment.origin.topic_name)
-
-        if attachment.reply:
-            reply_body = "> " + attachment.reply.replace("\n", "\n> ")
-            self.__client.send_message(
-                mto=self.__muc,
-                mbody=reply_body,
-                mtype="groupchat"
-            )
-
         upload_file = self.__client.plugin['xep_0363'].upload_file
 
         async with aiohttp.ClientSession() as session:
@@ -383,6 +373,17 @@ class XmppRoomHandler(ChatHandler):
                         f'<body xmlns="http://www.w3.org/1999/xhtml">'
                         f'<a href="{url}">{url}</a></body>'
                     )
+
+                    await self.__change_nick(attachment.sender, attachment.origin.topic_name)
+
+                    if attachment.reply:
+                        reply_body = "> " + attachment.reply.replace("\n", "\n> ")
+                        self.__client.send_message(
+                            mto=self.__muc,
+                            mbody=reply_body,
+                            mtype="groupchat"
+                        )
+
                     message = self.__client.make_message(
                         mbody=url,
                         mto=self.__muc,
