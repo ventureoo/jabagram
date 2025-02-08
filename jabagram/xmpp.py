@@ -191,7 +191,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         sender = message['mucnick']
         message_id = message['id']
         muc = message['mucroom']
-        text = message['body']
+        text = message['body'].strip()
         origin = EventOrigin(
             id=message_id
         )

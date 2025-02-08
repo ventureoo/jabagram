@@ -566,11 +566,11 @@ class TelegramChatHandler(ChatHandler):
                     message.sender
                 )
 
-                if origin.thread_id:
-                    params["message_thread_id"] = origin.thread_id
+                if origin.topic_id:
+                    params["message_thread_id"] = origin.topic_id
                     if entry:
                         entry.time = datetime.now()
-                        entry.topic_id = origin.thread_id
+                        entry.topic_id = origin.topic_id
                 else:
                     if entry and is_time_left(entry.time, TELEGRAM_TOPIC_TIMEOUT):
                         params["message_thread_id"] = entry.topic_id
