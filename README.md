@@ -202,7 +202,7 @@ for users you have in your contacts [1]. Please, after inviting a bot to XMPP,
 make sure you remove it from your contacts, otherwise it will not accept
 Telegram sender nicknames for you.
 
-[1] - https://github.com/iNPUTmice/Conversations/commit/ef1429c9a6983c101da41a277bd9353374dc89e7
+[1] - https://codeberg.org/iNPUTmice/Conversations/commit/ef1429c9a6983c101da41a277bd9353374dc89e7
 
 ## License
 
