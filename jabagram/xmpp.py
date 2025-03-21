@@ -119,9 +119,6 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         )
 
         try:
-            self.add_event_handler(
-                f"muc::{muc}::got_online", handler.nick_change_handler
-            )
             await self.plugin['xep_0045'].join_muc_wait(
                 JID(muc),
                 BRIDGE_DEFAULT_NAME,
@@ -294,14 +291,8 @@ class XmppRoomHandler(ChatHandler):
         self.__last_sender = BRIDGE_DEFAULT_NAME
         self.__cache = cache
         self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
-        self.__nick_change_event = asyncio.Event()
         self.__sticker_cache = sticker_cache
         self.__messages = messages
-
-    def nick_change_handler(self, presence):
-        nick = presence['from'].resource
-        if nick == self.__last_sender:
-            self.__nick_change_event.set()
 
     async def __change_nick(self, sender: str):
         sender = self.__validate_name(sender) + " (Telegram)"
@@ -310,15 +301,11 @@ class XmppRoomHandler(ChatHandler):
             return
 
         self.__logger.debug("Changing nick to %s", sender)
-        self.__client.send_presence(
-            pto=f"{self.__muc.bare}/{sender}",
-            pfrom=self.__client.boundjid.full
-        )
-        self.__last_sender = sender
-
-        # To avoid getting deadlock if for some reason the nickname has not
-        # been changed, even though we have processed its validity in advance.
-        await asyncio.wait_for(self.__nick_change_event.wait(), 15)
+        try:
+            self.__client.plugin['xep_0045'].set_self_nick(self.__muc, sender, 10)
+            self.__last_sender = sender
+        except TimeoutError:
+            self.__logger.error("Failed to change nickname to: %s", sender)
 
     async def send_message(self, message: Message) -> None:
         self.__logger.info("Sending message with id: %s", message.event_id)

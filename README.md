@@ -42,8 +42,8 @@ system with all the jabagram dependencies.
 ### Manual
 
 When manually installing to make the bridge work, you need to use Python 3.10+,
-and install all the dependencies specified in the ``requirements.txt``(slixmpp,
-aiohttp) file:
+and install all the dependencies specified in the ``requirements.txt``(slixmpp
+1.9.0+, aiohttp) file:
 
 ```
 git clone https://github.com/ventureoo/jabagram
