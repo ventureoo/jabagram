@@ -37,7 +37,6 @@ from .model import (
     ChatHandler,
     ChatHandlerFactory,
     Event,
-    EventOrigin,
     Message,
     Sticker,
     TelegramAttachment,
@@ -182,7 +181,6 @@ class TopicTimeoutEntry():
     def topic_id(self, topic_id: int):
         self.__topic_id = topic_id
 
-
 class TelegramClient(ChatHandlerFactory):
     def __init__(
         self,
@@ -201,6 +199,7 @@ class TelegramClient(ChatHandlerFactory):
         self.__service: ChatService = service
         self.__service.register_factory(self)
         self.__messages = messages
+        self.__handlers: dict[int, TelegramChatHandler] = {}
         self.__topic_name_cache = topic_name_cache
 
     async def create_handler(
@@ -213,9 +212,9 @@ class TelegramClient(ChatHandlerFactory):
             address=address,
             client=self,
             cache=cache,
-            topic_name_cache=self.__topic_name_cache,
             messages=self.__messages
         )
+        self.__handlers[int(address)] = handler
         self.__disptacher.add_handler(muc, handler)
 
     async def start(self):
@@ -404,7 +403,12 @@ class TelegramClient(ChatHandlerFactory):
         attachment: TelegramAttachment | None = self.__extract_attachment(
             sender, raw_message
         )
-        origin: EventOrigin = self.extract_message_origin(raw_message)
+        topic_name: str | None = self.__extract_topic_name(raw_message)
+
+        if topic_name:
+            sender += " [" + topic_name + "]"
+
+        message_id = str(raw_message['message_id'])
 
         if attachment:
             async def url_callback():
@@ -425,7 +429,7 @@ class TelegramClient(ChatHandlerFactory):
             if attachment.is_cacheable:
                 await self.__disptacher.send(
                     Sticker(
-                        origin=origin,
+                        event_id=message_id,
                         content=attachment.fname,
                         address=chat_id,
                         sender=sender,
@@ -438,7 +442,7 @@ class TelegramClient(ChatHandlerFactory):
             else:
                 await self.__disptacher.send(
                     Attachment(
-                        origin=origin,
+                        event_id=message_id,
                         address=chat_id,
                         sender=sender,
                         content=attachment.fname,
@@ -454,7 +458,7 @@ class TelegramClient(ChatHandlerFactory):
         if text:
             await self.__disptacher.send(
                 Message(
-                    origin=origin,
+                    event_id=message_id,
                     address=chat_id,
                     content=text,
                     sender=sender,
@@ -477,46 +481,38 @@ class TelegramClient(ChatHandlerFactory):
 
         return name
 
-    def extract_message_origin(
+    def __extract_topic_name(
         self,
         message: dict
-    ) -> EventOrigin:
-        message_id = message['message_id']
+    ) -> str | None:
         chat_id = str(message['chat']['id'])
-        origin = EventOrigin(id=message_id)
         topic_id = message.get("message_thread_id")
 
-        if topic_id:
-            topic_name = self.__topic_name_cache.get(chat_id, topic_id)
+        if not topic_id:
+            return None
 
-            if topic_name:
-                origin = EventOrigin(
-                    id=message_id,
-                    topic_id=topic_id,
-                    topic_name=topic_name
+        handler = self.__handlers.get(message['chat']['id'])
+        if handler:
+            handler.add_topic_id(message['message_id'], topic_id)
+
+        topic_name = self.__topic_name_cache.get(chat_id, topic_id)
+
+        if topic_name:
+            return topic_name
+
+        reply_message = message.get('reply_to_message')
+        if reply_message:
+            topic = reply_message.get("forum_topic_created")
+            if topic:
+                self.__topic_name_cache.add(
+                    chat_id, topic_id, topic.get("name")
                 )
+                return topic.get("name")
             else:
-                reply_message = message.get('reply_to_message')
-                if reply_message:
-                    topic = reply_message.get("forum_topic_created")
-                    if topic:
-                        self.__topic_name_cache.add(
-                            chat_id, topic_id, topic.get("name")
-                        )
-                        origin = EventOrigin(
-                            id=message_id,
-                            topic_id=topic_id,
-                            topic_name=topic.get("name")
-                        )
-                    else:
-                        if reply_message.get("is_topic_message"):
-                            origin = EventOrigin(
-                                id=message_id,
-                                topic_id=topic_id,
-                                topic_name="Unknown"
-                            )
+                if reply_message.get("is_topic_message"):
+                    return "Unknown"
 
-        return origin
+        return None
 
     def get_api(self) -> TelegramApi:
         return self.__api
@@ -528,16 +524,15 @@ class TelegramChatHandler(ChatHandler):
         address: str,
         client: TelegramClient,
         cache: Cache,
-        topic_name_cache: TopicNameCache,
         messages: Messages
     ) -> None:
         super().__init__(address)
         self.__cache = cache
         self.__logger = logging.getLogger(f"TelegramChatHandler ({address})")
-        self.__client = client
         self.__api = client.get_api()
         self.__messages = messages
         self.__residence_map: dict[str, TopicTimeoutEntry] = {}
+        self.__topic_ids_cache: dict[str, int] = {}
 
     def __make_bold_sender_name(self, text: str):
         message_entities = [
@@ -549,6 +544,9 @@ class TelegramChatHandler(ChatHandler):
         ]
         return dumps(message_entities)
 
+    def add_topic_id(self, message_id: str, topic_id: int):
+        self.__topic_ids_cache[message_id] = topic_id
+
     async def send_message(self, message: Message) -> None:
         params: dict[str, Any] = {
             "text": f"{message.sender}: {message.content}",
@@ -557,20 +555,21 @@ class TelegramChatHandler(ChatHandler):
         }
 
         if message.reply:
-            origin: EventOrigin | None = self.__cache.reply_map.get(message.reply)
-            if origin:
+            telegram_id: str | None = self.__cache.reply_map.get(message.reply)
+            if telegram_id:
                 params["text"] = f"{message.sender}: {message.content}"
-                params["reply_to_message_id"] = origin.id
+                params["reply_to_message_id"] = telegram_id
 
                 entry: TopicTimeoutEntry | None = self.__residence_map.get(
                     message.sender
                 )
 
-                if origin.topic_id:
-                    params["message_thread_id"] = origin.topic_id
+                topic_id = self.__topic_ids_cache.get(telegram_id)
+                if topic_id:
+                    params["message_thread_id"] = topic_id
                     if entry:
                         entry.time = datetime.now()
-                        entry.topic_id = origin.topic_id
+                        entry.topic_id = topic_id
                 else:
                     if entry and is_time_left(entry.time, TELEGRAM_TOPIC_TIMEOUT):
                         params["message_thread_id"] = entry.topic_id
@@ -604,11 +603,14 @@ class TelegramChatHandler(ChatHandler):
         try:
             response = await self.__api.sendMessage(**params)
             self.__cache.reply_map.add(
-                message.content, self.__client.extract_message_origin(response)
+                message.content, response['message_id']
             )
             self.__cache.message_ids.add(
-                message.origin.id, response['message_id']
+                message.event_id, response['message_id']
             )
+            thread_id = response.get("message_thread_id")
+            if thread_id:
+                self.__topic_ids_cache[response['message_id']] = thread_id
         except TelegramApiError as error:
             self.__logger.error("Error sending a message: %s", error)
 
@@ -666,8 +668,12 @@ class TelegramChatHandler(ChatHandler):
 
                     try:
                         response = await method(form_data, **params)
-                        origin = self.__client.extract_message_origin(response)
-                        self.__cache.reply_map.add(attachment.content, origin)
+                        self.__cache.reply_map.add(
+                            attachment.content, response['message_id']
+                        )
+                        thread_id = response.get("message_thread_id")
+                        if thread_id:
+                            self.__topic_ids_cache[response['message_id']] = thread_id
                     except TelegramApiError as error:
                         try:
                             await self.__api.sendMessage(
@@ -692,13 +698,13 @@ class TelegramChatHandler(ChatHandler):
 
     async def edit_message(self, message: Message) -> None:
         telegram_id: str | None = self.__cache.message_ids.get(
-            message.origin.id
+            message.event_id
         )
 
         if not telegram_id:
             self.__logger.info(
                 "Failed to found telegram message id for event: %d",
-                message.origin.id
+                message.event_id
             )
             return
 
@@ -733,8 +739,11 @@ class TelegramChatHandler(ChatHandler):
                 params["entities"] = dumps(format)
         try:
             response = await self.__api.editMessageText(**params)
-            origin = self.__client.extract_message_origin(response)
-            self.__cache.reply_map.add(message.content, origin)
+            self.__cache.reply_map.add(message.content, message.event_id)
+
+            thread_id = response.get("message_thread_id")
+            if thread_id:
+                self.__topic_ids_cache[response['message_id']] = thread_id
         except TelegramApiError as error:
             self.__logger.error("Error while editing a message: %s", error)
 

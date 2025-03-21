@@ -33,18 +33,12 @@ class UnbridgeEvent(Forwardable):
     pass
 
 @dataclass(kw_only=True)
-class EventOrigin():
-    id: str
-    topic_id: Optional[int] = None
-    topic_name: Optional[str] = None
-
-@dataclass(kw_only=True)
 class Event(Forwardable):
-    origin: EventOrigin
+    event_id: str
     content: str
 
     def __str__(self):
-        return (f'Event(origin=\'{self.origin}\')')
+        return (f'Event(id=\'{self.event_id}\')')
 
 
 @dataclass(kw_only=True)
@@ -54,7 +48,7 @@ class Message(Event):
     edit: Optional[bool] = False
 
     def __str__(self):
-        return (f'Message(origin=\'{self.origin}\', '
+        return (f'Message(id=\'{self.event_id}\', '
                 f'sender=\'{self.sender}\', is_reply={self.reply is not None},'
                 f' is_edit={self.edit})')
 
@@ -66,7 +60,7 @@ class Attachment(Message):
     fsize: Optional[int] = None
 
     def __str__(self):
-        return (f'Attachment(origin=\'{self.origin}\', '
+        return (f'Attachment(id=\'{self.event_id}\', '
                 f'sender=\'{self.sender}\', is_reply={self.reply is not None},'
                 f' is_edit={self.edit}, mime=\'{self.mime}\', '
                 f'fsize=\'{self.fsize}\')')
