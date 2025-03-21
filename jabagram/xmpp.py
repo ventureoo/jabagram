@@ -302,8 +302,7 @@ class XmppRoomHandler(ChatHandler):
 
         self.__logger.debug("Changing nick to %s", sender)
         try:
-            self.__client.plugin['xep_0045'].set_self_nick(self.__muc, sender, 10)
-            self.__last_sender = sender
+            self.__last_sender = await self.__client.plugin['xep_0045'].set_self_nick(self.__muc, sender, 10)
         except TimeoutError:
             self.__logger.error("Failed to change nickname to: %s", sender)
 
