@@ -293,6 +293,7 @@ class XmppRoomHandler(ChatHandler):
         self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
         self.__sticker_cache = sticker_cache
         self.__messages = messages
+        self.__muc_handle = client.plugin['xep_0045']
 
     async def __change_nick(self, sender: str):
         sender = self.__validate_name(sender) + " (Telegram)"
@@ -302,7 +303,11 @@ class XmppRoomHandler(ChatHandler):
 
         self.__logger.debug("Changing nick to %s", sender)
         try:
-            self.__last_sender = await self.__client.plugin['xep_0045'].set_self_nick(self.__muc, sender, 10)
+            self.__last_sender = await self.__muc_handle.set_self_nick(
+                room=self.__muc,
+                new_nick=sender,
+                timeout=10
+            )
         except TimeoutError:
             self.__logger.error("Failed to change nickname to: %s", sender)
 
@@ -481,7 +486,7 @@ class XmppRoomHandler(ChatHandler):
             mbody=self.__messages.unbridge_xmpp,
             mtype="groupchat"
         )
-        self.__client.plugin['xep_0045'].leave_muc(
+        self.__muc_handle.leave_muc(
             self.__muc, self.__last_sender
         )
 
