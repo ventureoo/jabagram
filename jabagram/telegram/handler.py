@@ -23,8 +23,7 @@ from typing import Any
 
 from aiohttp import ClientConnectionError
 from datetime import datetime
-from jabagram.telegram.api import TelegramApiError
-from jabagram.telegram.client import TelegramClient
+from jabagram.telegram.api import TelegramApi, TelegramApiError
 from jabagram.model import ChatHandler, Event, Message, Attachment
 from jabagram.messages import Messages
 from jabagram.cache import Cache
@@ -60,14 +59,14 @@ class TelegramChatHandler(ChatHandler):
     def __init__(
         self,
         address: str,
-        client: TelegramClient,
+        api: TelegramApi,
         cache: Cache,
         messages: Messages
     ) -> None:
         super().__init__(address)
         self.__cache = cache
         self.__logger = logging.getLogger(f"TelegramChatHandler ({address})")
-        self.__api = client.get_api()
+        self.__api = api
         self.__messages = messages
         self.__residence_map: dict[str, TopicTimeoutEntry] = {}
         self.__topic_ids_cache: dict[str, int] = {}

@@ -64,7 +64,7 @@ class TelegramClient(ChatHandlerFactory):
     ) -> None:
         handler = TelegramChatHandler(
             address=address,
-            client=self,
+            api=self.__api,
             cache=cache,
             messages=self.__messages
         )
