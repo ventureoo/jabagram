@@ -101,9 +101,6 @@ class ChatHandler(ABC):
     async def send_attachment(self, attachment: Attachment) -> None:
         pass
 
-    async def send_sticker(self, sticker: Sticker) -> None:
-        pass
-
     @abstractmethod
     async def unbridge(self) -> None:
         pass

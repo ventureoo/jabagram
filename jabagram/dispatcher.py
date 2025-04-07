@@ -28,7 +28,6 @@ from jabagram.model import (
     Event,
     Forwardable,
     Message,
-    Sticker,
     UnbridgeEvent,
 )
 
@@ -60,11 +59,6 @@ class MessageDispatcher():
                 continue
 
             match forwardable:
-                case Sticker():
-                    self.__loop.create_task(
-                        handler.send_sticker(
-                            forwardable)
-                    )
                 case Attachment():
                     self.__loop.create_task(
                         handler.send_attachment(forwardable)

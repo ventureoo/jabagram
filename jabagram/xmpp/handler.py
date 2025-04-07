@@ -15,11 +15,11 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+import aiohttp
 import logging
 import stringprep
 import re
 
-from aiohttp import ClientSession, ClientConnectionError
 from functools import lru_cache
 from jabagram.cache import Cache, StickerCache
 from jabagram.messages import Messages
@@ -103,18 +103,38 @@ class XmppRoomHandler(ChatHandler):
         msg.send()
 
     async def send_attachment(self, attachment: Attachment) -> None:
-        url = await attachment.url_callback()
+        url = None
+        if isinstance(attachment, Sticker):
+            self.__logger.info("Sending sticker with id: %s", attachment.file_id)
+            url = self.__sticker_cache.get(attachment.file_id)
+
+            # Reupload file if XMPP server deleted it after some time.
+            if url:
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.head(url) as resp:
+                            if resp.status == 404:
+                                url = None
+                                self.__logger.info(
+                                    "Cache miss for a file: %s",
+                                    attachment.file_id
+                                )
+                except aiohttp.ClientConnectionError as error:
+                    self.__logger.error(
+                        "Cannot do head request for file: %s", error
+                    )
+
+        else:
+            self.__logger.info(
+                "Sending attachment with name: %s", attachment.content
+            )
 
         if not url:
-            return
-
-        self.__logger.info(
-            "Sending attachment with name: %s", attachment.content
-        )
+            url = await attachment.url_callback()
 
         upload_file = self.__client.plugin['xep_0363'].upload_file
 
-        async with ClientSession() as session:
+        async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(url) as resp:
                     url = await upload_file(
@@ -123,7 +143,11 @@ class XmppRoomHandler(ChatHandler):
                         content_type=attachment.mime or resp.content_type,
                         input_file=resp.content # type: ignore
                     )
-            except (HTTPError, ClientConnectionError, IqTimeout) as error:
+                    if isinstance(attachment, Sticker):
+                        self.__sticker_cache.add(
+                            attachment.file_id, url
+                        )
+            except (HTTPError, aiohttp.ClientConnectionError, IqTimeout) as error:
                 self.__logger.error("Cannot upload file: %s", error)
                 return
 
@@ -136,69 +160,6 @@ class XmppRoomHandler(ChatHandler):
                 mbody=reply_body,
                 mtype="groupchat"
             )
-
-        html = (
-            f'<body xmlns="http://www.w3.org/1999/xhtml">'
-            f'<a href="{url}">{url}</a></body>'
-        )
-        message = self.__client.make_message(
-            mbody=url,
-            mto=self.__muc,
-            mtype='groupchat',
-            mhtml=html
-        )
-        message['oob']['url'] = url
-        message.send()
-
-    async def send_sticker(self, sticker: Sticker) -> None:
-        self.__logger.info("Sending sticker with id: %s", sticker.file_id)
-        url = self.__sticker_cache.get(sticker.file_id)
-
-        if url:
-            try:
-                async with ClientSession() as session:
-                    async with session.head(url) as resp:
-                        if resp.status == 404:
-                            # Reupload file if XMPP server deleted it after
-                            # some time.
-                            url = None
-                            self.__logger.info(
-                                "Cache miss for a file: %s", sticker.file_id
-                            )
-            except ClientConnectionError as error:
-                self.__logger.error(
-                    "Cannot do head request for file: %s", error
-                )
-                return
-
-        if not url:
-            upload_file = self.__client.plugin['xep_0363'].upload_file
-            attachment_url = await sticker.url_callback()
-
-            if not attachment_url:
-                return
-
-            async with ClientSession() as session:
-                try:
-                    async with session.get(attachment_url) as resp:
-                        url = await upload_file(
-                            filename=Path(sticker.content),
-                            size=sticker.fsize or resp.content_length,
-                            content_type=sticker.mime or resp.content_type,
-                            input_file=resp.content  # type: ignore
-                        )
-                        self.__sticker_cache.add(
-                            sticker.file_id, url
-                        )
-                except (HTTPError, ClientConnectionError) as error:
-                    self.__logger.error("Cannot upload file: %s", error)
-                    return
-        else:
-            self.__logger.info(
-                "Sticker %s was taken from the cache", sticker.file_id
-            )
-
-        await self.__change_nick(sticker.sender)
 
         html = (
             f'<body xmlns="http://www.w3.org/1999/xhtml">'
