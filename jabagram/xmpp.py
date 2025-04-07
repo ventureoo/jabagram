@@ -288,7 +288,6 @@ class XmppRoomHandler(ChatHandler):
         super().__init__(address)
         self.__client = client
         self.__muc = JID(address)
-        self.__last_sender = BRIDGE_DEFAULT_NAME
         self.__cache = cache
         self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
         self.__sticker_cache = sticker_cache
@@ -298,12 +297,12 @@ class XmppRoomHandler(ChatHandler):
     async def __change_nick(self, sender: str):
         sender = self.__validate_name(sender) + " (Telegram)"
 
-        if sender == self.__last_sender:
+        if sender == self.__muc_handle.get_nick(self.__muc, self.__client.boundjid):
             return
 
         self.__logger.debug("Changing nick to %s", sender)
         try:
-            self.__last_sender = await self.__muc_handle.set_self_nick(
+            await self.__muc_handle.set_self_nick(
                 room=self.__muc,
                 new_nick=sender,
                 timeout=10
@@ -487,7 +486,10 @@ class XmppRoomHandler(ChatHandler):
             mtype="groupchat"
         )
         self.__muc_handle.leave_muc(
-            self.__muc, self.__last_sender
+            room=self.__muc,
+            nick=self.__muc_handle.get_nick(
+                self.__muc, self.__client.boundjid
+            ) or BRIDGE_DEFAULT_NAME
         )
 
     @lru_cache(maxsize=100)
