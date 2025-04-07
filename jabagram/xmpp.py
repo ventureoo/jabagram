@@ -22,6 +22,7 @@ from functools import lru_cache
 import logging
 import stringprep
 import re
+from pathlib import Path
 from unidecode import unidecode
 
 import aiohttp
@@ -345,10 +346,10 @@ class XmppRoomHandler(ChatHandler):
             try:
                 async with session.get(url) as resp:
                     url = await upload_file(
-                        filename=attachment.content,
-                        size=attachment.fsize or resp.length,
+                        filename=Path(attachment.content),
+                        size=attachment.fsize or resp.content_length,
                         content_type=attachment.mime or resp.content_type,
-                        input_file=resp.content
+                        input_file=resp.content # type: ignore
                     )
             except (HTTPError, ClientConnectionError, IqTimeout) as error:
                 self.__logger.error("Cannot upload file: %s", error)
@@ -409,10 +410,10 @@ class XmppRoomHandler(ChatHandler):
                 try:
                     async with session.get(attachment_url) as resp:
                         url = await upload_file(
-                            filename=sticker.content,
+                            filename=Path(sticker.content),
                             size=sticker.fsize or resp.content_length,
                             content_type=sticker.mime or resp.content_type,
-                            input_file=resp.content
+                            input_file=resp.content  # type: ignore
                         )
                         self.__sticker_cache.add(
                             sticker.file_id, url
