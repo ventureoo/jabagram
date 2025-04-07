@@ -21,8 +21,8 @@ from asyncio import Queue
 import logging
 from typing import Dict
 
-from .database import Database
-from .model import (
+from jabagram.database import Database
+from jabagram.model import (
     Attachment,
     ChatHandler,
     Event,

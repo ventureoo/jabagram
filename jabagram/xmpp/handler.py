@@ -15,35 +15,21 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
-import asyncio
-from datetime import datetime
-from functools import lru_cache
 import logging
 import stringprep
 import re
-from pathlib import Path
-from unidecode import unidecode
 
-import aiohttp
-from aiohttp import ClientConnectionError
+from aiohttp import ClientSession, ClientConnectionError
+from functools import lru_cache
+from jabagram.cache import Cache, StickerCache
 from jabagram.messages import Messages
-from slixmpp.clientxmpp import ClientXMPP
-from slixmpp.exceptions import IqTimeout, PresenceError
+from jabagram.model import ChatHandler, Event, Message, Attachment, Sticker
+from jabagram.xmpp.client import XmppClient
+from pathlib import Path
+from slixmpp.exceptions import IqTimeout
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
-
-from .cache import Cache, StickerCache
-from .database import ChatService
-from .dispatcher import MessageDispatcher
-from .model import (
-    Attachment,
-    ChatHandler,
-    ChatHandlerFactory,
-    Event,
-    Message,
-    Sticker
-)
+from unidecode import unidecode
 
 # XMPP does not support all available characters for resourcepart in JIDs, so
 # we need to filter a range of characters.
@@ -61,221 +47,7 @@ BLACKLIST_USERNAME_CHARS = (
     stringprep.in_table_c9
 )
 BRIDGE_DEFAULT_NAME = "Telegram Bridge"
-XMPP_OCCUPANT_ERROR = "Only occupants are allowed to send messages to the conference"
 RTL_CHAR_PATTERN = re.compile(r'[\u0590-\u05FF\u0600-\u06FF]')
-
-
-class XmppClient(ClientXMPP, ChatHandlerFactory):
-    def __init__(
-        self,
-        jid: str,
-        password: str,
-        service: ChatService,
-        disptacher: MessageDispatcher,
-        sticker_cache: StickerCache,
-        messages: Messages
-    ) -> None:
-        ClientXMPP.__init__(self, jid, password)
-        self.__service = service
-        self.__logger = logging.getLogger(self.__class__.__name__)
-        self.__dispatcher = disptacher
-        self.__sticker_cache = sticker_cache
-        self.__mucs = []
-
-        # Used XEPs
-        xeps = ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
-                'xep_0308', 'xep_0045', 'xep_0066', 'xep_0199')
-        list(map(self.register_plugin, xeps))
-
-        # Common event handlers
-        self.add_event_handler("session_start", self.__session_start)
-        self.add_event_handler("groupchat_message", self.__process_message)
-        self.add_event_handler(
-            "groupchat_message_error", self.__process_errors
-        )
-        self.add_event_handler(
-            'groupchat_direct_invite', self.__invite_callback
-        )
-        self.add_event_handler("disconnected", self.__on_connection_reset)
-        self.add_event_handler("connected", self.__on_connected)
-        self.__reconnecting = False
-        self.__service.register_factory(self)
-        self.__messages = messages
-
-    async def start(self):
-        self.connect()
-
-    async def create_handler(
-        self,
-        address: str,
-        muc: str,
-        cache: Cache,
-    ) -> None:
-        handler = XmppRoomHandler(
-            muc,
-            self,
-            cache,
-            self.__sticker_cache,
-            self.__messages
-        )
-
-        try:
-            await self.plugin['xep_0045'].join_muc_wait(
-                JID(muc),
-                BRIDGE_DEFAULT_NAME,
-                maxstanzas=0
-            )
-            self.__mucs.append(muc)
-            self.__dispatcher.add_handler(address, handler)
-        except PresenceError as error:
-            self.__logger.error("Failed to join muc: %s", error)
-
-
-    async def __on_connection_reset(self, event):
-        self.__logger.warning(
-            "Connection reset: %s. Attempting to reconnect...", event)
-        self.__reconnecting = True
-
-        # Wait for synchronous handlers
-        await asyncio.sleep(5)
-
-        self.connect()
-
-    async def __session_start(self, _):
-        await self.get_roster()
-        self.send_presence()
-
-        if self.__reconnecting:
-            for muc in self.__mucs:
-                try:
-                    self.__logger.info(
-                        "Trying to rejoin %s room...", muc
-                    )
-                    await self.plugin['xep_0045'].join_muc_wait(
-                        JID(muc),
-                        BRIDGE_DEFAULT_NAME,
-                        maxstanzas=0
-                    )
-                    self.__logger.info(
-                        "Successfully rejoined to the room %s"
-                    )
-                except PresenceError as error:
-                    self.__logger.error(
-                        "Failed to re-join into MUC: %s", error
-                    )
-        else:
-            await self.__service.load_chats()
-
-    async def __on_connected(self, _):
-        self.__logger.info("Successfully connected.")
-
-    async def __invite_callback(self, invite):
-        muc = str(invite['groupchat_invite']['jid'])
-        key = invite['groupchat_invite']['reason']
-        await self.__service.bind(muc, key)
-
-    async def __process_errors(self, message):
-        room = message['from'].bare
-        if message['error']['text'] == XMPP_OCCUPANT_ERROR \
-                and self.__dispatcher.is_bound(room):
-            await self.plugin['xep_0045'].join_muc_wait(
-                message['from'],
-                BRIDGE_DEFAULT_NAME,
-                maxstanzas=0
-            )
-
-    async def __process_message(self, message):
-        sender = message['mucnick']
-        message_id = message['id']
-        muc = message['mucroom']
-        text = message['body'].strip()
-
-        if not self.__dispatcher.is_bound(muc):
-            return
-
-        if sender.endswith("(Telegram)") or \
-                sender == BRIDGE_DEFAULT_NAME:
-            return
-
-        if message['oob']['url']:
-            url = message['oob']['url']
-
-            async def url_callback():
-                return url
-
-            fname = url.split("/")[-1]
-            attachment = Attachment(
-                event_id=message_id,
-                address=muc,
-                sender=sender,
-                url_callback=url_callback,
-                content=fname,
-                mime=None,
-                fsize=None
-            )
-            await self.__dispatcher.send(attachment)
-        else:
-            content = text
-            is_edit = False
-
-            if message['replace']['id']:
-                message_id = message['replace']['id']
-                is_edit = True
-
-            reply, body = self.__parse_reply(text)
-
-            if reply and body:
-                content = body
-
-            message = Message(
-                address=muc,
-                content=content,
-                reply=reply,
-                edit=is_edit,
-                sender=sender,
-                event_id=message_id
-            )
-            await self.__dispatcher.send(message)
-
-    def __parse_reply(self, message: str) -> tuple[str | None, str | None]:
-        def _safe_get(line: str, index: int):
-            try:
-                return line[index]
-            except IndexError:
-                return None
-
-        replies = []
-        parts = []
-
-        for line in message.splitlines():
-            if _safe_get(line, 0) == ">":
-                # Ignore brackets not followed by space
-                if _safe_get(line, 1) != " ":
-                    continue
-
-                # Ignore nested replies
-                if _safe_get(line, 2) == ">":
-                    continue
-
-                line = line.replace("> ", "").strip()
-
-                # Attempt to detect a replies format of some mobile clients
-                # that add time and sender name of the message sent
-                try:
-                    datetime.strptime(line, '%Y-%m-%d  %H:%M (GMT%z)')
-
-                    # Remove sender name of message being replied to
-                    replies.pop()
-                except ValueError:
-                    replies.append(line)
-            else:
-                parts.append(line)
-
-        reply = "\n".join(replies)
-        body = "\n".join(parts)
-
-        return reply, body
-
 
 class XmppRoomHandler(ChatHandler):
     def __init__(
@@ -342,7 +114,7 @@ class XmppRoomHandler(ChatHandler):
 
         upload_file = self.__client.plugin['xep_0363'].upload_file
 
-        async with aiohttp.ClientSession() as session:
+        async with ClientSession() as session:
             try:
                 async with session.get(url) as resp:
                     url = await upload_file(
@@ -384,7 +156,7 @@ class XmppRoomHandler(ChatHandler):
 
         if url:
             try:
-                async with aiohttp.ClientSession() as session:
+                async with ClientSession() as session:
                     async with session.head(url) as resp:
                         if resp.status == 404:
                             # Reupload file if XMPP server deleted it after
@@ -406,7 +178,7 @@ class XmppRoomHandler(ChatHandler):
             if not attachment_url:
                 return
 
-            async with aiohttp.ClientSession() as session:
+            async with ClientSession() as session:
                 try:
                     async with session.get(attachment_url) as resp:
                         url = await upload_file(

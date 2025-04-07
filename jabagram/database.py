@@ -21,8 +21,8 @@ import sqlite3
 from sqlite3 import Error, connect
 from typing import Dict, List
 
-from .cache import Cache
-from .model import ChatHandlerFactory
+from jabagram.cache import Cache
+from jabagram.model import ChatHandlerFactory
 
 class Database():
     def __init__(self, path):

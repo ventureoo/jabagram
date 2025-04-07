@@ -20,22 +20,20 @@ import argparse
 import asyncio
 import configparser
 import logging
-from os import path
 
+from jabagram.cache import StickerCache, TopicNameCache
+from jabagram.database import ChatService, Database
+from jabagram.dispatcher import MessageDispatcher
 from jabagram.messages import Messages
-
-from .cache import StickerCache, TopicNameCache
-from .database import ChatService, Database
-from .dispatcher import MessageDispatcher
-from .telegram import TelegramClient
-from .xmpp import XmppClient
+from jabagram.telegram.client import TelegramClient
+from jabagram.xmpp.client import XmppClient
+from os import path
 
 CONFIG_FILE_NOT_FOUND = """
 Configuration file not found.
 Perhaps you forgot to rename config.ini.example?
 Use the -c key to specify the full path to the config.
 """
-
 
 def main():
     parser = argparse.ArgumentParser(
