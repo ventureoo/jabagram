@@ -17,7 +17,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from jabagram.cache import Cache
@@ -35,10 +35,7 @@ class UnbridgeEvent(Forwardable):
 @dataclass(kw_only=True)
 class Event(Forwardable):
     event_id: str
-    content: str
-
-    def __str__(self):
-        return (f'Event(id=\'{self.event_id}\')')
+    content: str = field(repr=False)
 
 
 @dataclass(kw_only=True)
@@ -47,23 +44,12 @@ class Message(Event):
     reply: Optional[str] = None
     edit: Optional[bool] = False
 
-    def __str__(self):
-        return (f'Message(id=\'{self.event_id}\', '
-                f'sender=\'{self.sender}\', is_reply={self.reply is not None},'
-                f' is_edit={self.edit})')
-
 
 @dataclass(kw_only=True)
 class Attachment(Message):
     url_callback: Callable
     mime: Optional[str] = None
     fsize: Optional[int] = None
-
-    def __str__(self):
-        return (f'Attachment(id=\'{self.event_id}\', '
-                f'sender=\'{self.sender}\', is_reply={self.reply is not None},'
-                f' is_edit={self.edit}, mime=\'{self.mime}\', '
-                f'fsize=\'{self.fsize}\')')
 
 
 @dataclass(kw_only=True)
