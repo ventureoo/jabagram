@@ -84,11 +84,11 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         cache: Cache,
     ) -> None:
         handler = XmppRoomHandler(
-            muc,
-            self,
-            cache,
-            self.__sticker_cache,
-            self.__messages
+            address=muc,
+            client=self,
+            cache=cache,
+            sticker_cache=self.__sticker_cache,
+            messages=self.__messages
         )
 
         try:

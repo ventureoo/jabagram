@@ -21,11 +21,12 @@ import stringprep
 import re
 
 from functools import lru_cache
+
 from jabagram.cache import Cache, StickerCache
 from jabagram.messages import Messages
 from jabagram.model import ChatHandler, Event, Message, Attachment, Sticker
-from jabagram.xmpp.client import XmppClient
 from pathlib import Path
+from slixmpp.clientxmpp import ClientXMPP
 from slixmpp.exceptions import IqTimeout
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
@@ -53,7 +54,7 @@ class XmppRoomHandler(ChatHandler):
     def __init__(
         self,
         address: str,
-        client: XmppClient,
+        client: ClientXMPP,
         cache: Cache,
         sticker_cache: StickerCache,
         messages: Messages
