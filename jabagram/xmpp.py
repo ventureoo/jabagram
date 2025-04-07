@@ -350,35 +350,32 @@ class XmppRoomHandler(ChatHandler):
                         content_type=attachment.mime or resp.content_type,
                         input_file=resp.content
                     )
-                    html = (
-                        f'<body xmlns="http://www.w3.org/1999/xhtml">'
-                        f'<a href="{url}">{url}</a></body>'
-                    )
-
-                    await self.__change_nick(attachment.sender)
-
-                    if attachment.reply:
-                        reply_body = "> " + attachment.reply.replace("\n", "\n> ")
-                        self.__client.send_message(
-                            mto=self.__muc,
-                            mbody=reply_body,
-                            mtype="groupchat"
-                        )
-
-                    message = self.__client.make_message(
-                        mbody=url,
-                        mto=self.__muc,
-                        mtype='groupchat',
-                        mhtml=html
-                    )
-                    message['oob']['url'] = url
-                    message.send()
-            except HTTPError as error:
+            except (HTTPError, ClientConnectionError, IqTimeout) as error:
                 self.__logger.error("Cannot upload file: %s", error)
-            except ClientConnectionError as error:
-                self.__logger.error("Cannot upload file: %s", error)
-            except IqTimeout as error:
-                self.__logger.error("Cannot upload file: %s", error)
+                return
+
+        await self.__change_nick(attachment.sender)
+
+        if attachment.reply:
+            reply_body = "> " + attachment.reply.replace("\n", "\n> ")
+            self.__client.send_message(
+                mto=self.__muc,
+                mbody=reply_body,
+                mtype="groupchat"
+            )
+
+        html = (
+            f'<body xmlns="http://www.w3.org/1999/xhtml">'
+            f'<a href="{url}">{url}</a></body>'
+        )
+        message = self.__client.make_message(
+            mbody=url,
+            mto=self.__muc,
+            mtype='groupchat',
+            mhtml=html
+        )
+        message['oob']['url'] = url
+        message.send()
 
     async def send_sticker(self, sticker: Sticker) -> None:
         self.__logger.info("Sending sticker with id: %s", sticker.file_id)
@@ -420,10 +417,7 @@ class XmppRoomHandler(ChatHandler):
                         self.__sticker_cache.add(
                             sticker.file_id, url
                         )
-                except HTTPError as error:
-                    self.__logger.error("Cannot upload file: %s", error)
-                    return
-                except ClientConnectionError as error:
+                except (HTTPError, ClientConnectionError) as error:
                     self.__logger.error("Cannot upload file: %s", error)
                     return
         else:
