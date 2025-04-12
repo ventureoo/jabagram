@@ -47,7 +47,7 @@ class Message(Event):
 
 @dataclass(kw_only=True)
 class Attachment(Message):
-    url_callback: Callable
+    url_callback: Callable = field(repr=False)
     mime: Optional[str] = None
     fsize: Optional[int] = None
 
