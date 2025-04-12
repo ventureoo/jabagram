@@ -67,16 +67,17 @@ class XmppRoomHandler(ChatHandler):
         self.__sticker_cache = sticker_cache
         self.__messages = messages
         self.__muc_handle = client.plugin['xep_0045']
+        self.__last_sender = BRIDGE_DEFAULT_NAME
 
     async def __change_nick(self, sender: str):
         sender = self.__validate_name(sender) + " (Telegram)"
 
-        if sender == self.__muc_handle.get_nick(self.__muc, self.__client.boundjid):
+        if sender == self.__last_sender:
             return
 
         self.__logger.debug("Changing nick to %s", sender)
         try:
-            await self.__muc_handle.set_self_nick(
+            self.__last_sender = await self.__muc_handle.set_self_nick(
                 room=self.__muc,
                 new_nick=sender,
                 timeout=10
@@ -216,9 +217,7 @@ class XmppRoomHandler(ChatHandler):
         )
         self.__muc_handle.leave_muc(
             room=self.__muc,
-            nick=self.__muc_handle.get_nick(
-                self.__muc, self.__client.boundjid
-            ) or BRIDGE_DEFAULT_NAME
+            nick=self.__last_sender
         )
 
     @lru_cache(maxsize=100)
