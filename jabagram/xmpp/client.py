@@ -20,10 +20,11 @@ import asyncio
 import logging
 
 from datetime import datetime
-from jabagram.cache import Cache, StickerCache
-from jabagram.database import ChatService
+from jabagram.cache import Cache
+from jabagram.database.stickers import StickerCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.messages import Messages
+from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
     ChatHandlerFactory,

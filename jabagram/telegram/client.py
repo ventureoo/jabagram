@@ -19,10 +19,11 @@
 import logging
 import mimetypes
 
-from jabagram.cache import Cache, TopicNameCache
-from jabagram.database import ChatService
+from jabagram.cache import Cache
+from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.messages import Messages
+from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
     ChatHandlerFactory,
@@ -339,7 +340,7 @@ class TelegramClient(ChatHandlerFactory):
         self,
         message: dict
     ) -> str | None:
-        chat_id = str(message['chat']['id'])
+        chat_id = message['chat']['id']
         topic_id = message.get("message_thread_id")
 
         if not topic_id:

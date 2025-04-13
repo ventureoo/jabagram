@@ -21,10 +21,12 @@ import asyncio
 import configparser
 import logging
 
-from jabagram.cache import StickerCache, TopicNameCache
-from jabagram.database import ChatService, Database
+from jabagram.database.chats import ChatStorage
+from jabagram.database.stickers import StickerCache
+from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.messages import Messages
+from jabagram.service import ChatService
 from jabagram.telegram.client import TelegramClient
 from jabagram.xmpp.client import XmppClient
 from os import path
@@ -77,21 +79,27 @@ def main():
             config.read_file(f)
 
         messages.load()
-        database = Database(args.data)
-        sticker_cache = StickerCache(args.data)
-        topic_name_cache = TopicNameCache(args.data)
+        chat_storage = ChatStorage(path=args.data)
+        sticker_cache = StickerCache(path=args.data)
+        topic_name_cache = TopicNameCache(path=args.data)
 
-        if not database.create():
+        if not all([
+            chat_storage.create(),
+            sticker_cache.create(),
+            topic_name_cache.create()
+        ]):
             logger.error("Error when working with the database, interrupt...")
             return
 
         loop = asyncio.get_event_loop()
 
         service: ChatService = ChatService(
-            database,
-            config.get("general", "key")
+            storage=chat_storage,
+            key=config.get("general", "key")
         )
-        dispatcher: MessageDispatcher = MessageDispatcher(database)
+        dispatcher: MessageDispatcher = MessageDispatcher(
+            storage=chat_storage
+        )
         telegram = TelegramClient(
             config.get("telegram", "token"),
             config.get("xmpp", "login"),

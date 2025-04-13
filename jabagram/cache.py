@@ -17,7 +17,6 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 from collections import OrderedDict
 import logging
-from sqlite3 import Error, connect
 
 class SimpleLRUCache():
     def __init__(self, size: int):
@@ -39,75 +38,6 @@ class SimpleLRUCache():
         self.__map.move_to_end(key)
         if len(self.__map) > self.__size:
             self.__map.popitem(last=False)
-
-class StickerCache():
-    def __init__(self, path):
-        self.__path = path
-        self.__logger = logging.getLogger(self.__class__.__name__)
-
-    def add(self, file_id, xmpp_url: str) -> None:
-        try:
-            with connect(self.__path) as con:
-                cursor = con.cursor()
-                cursor.execute(
-                    "INSERT INTO stickers(file_id, xmpp_url) VALUES (?, ?) ON CONFLICT (file_id) DO UPDATE SET xmpp_url = excluded.xmpp_url",
-                    (file_id, xmpp_url)
-                )
-                con.commit()
-        except Error as e:
-            self.__logger.error("Can not add sticker: %s", e)
-
-    def get(self, file_id: str) -> str | None:
-        try:
-            with connect(self.__path) as con:
-                cursor = con.cursor()
-                cursor.execute(
-                    "SELECT xmpp_url FROM stickers WHERE file_id = ?", (file_id,)
-                )
-                row = cursor.fetchone()
-
-                if row:
-                    return row[0]
-
-                self.__logger.info("Cache miss for: %s", file_id)
-        except Error as e:
-            self.__logger.error("Can not get sticker: %s", e)
-
-class TopicNameCache():
-    def __init__(self, path):
-        self.__path = path
-        self.__logger = logging.getLogger(self.__class__.__name__)
-
-    def add(self, chat_id, topic_id, topic_name) -> None:
-        try:
-            with connect(self.__path) as con:
-                cursor = con.cursor()
-                cursor.execute(
-                    "INSERT INTO topics(chat_id, topic_id, topic_name) VALUES (?, ?, ?)",
-                    (chat_id, topic_id, topic_name)
-                )
-                con.commit()
-        except Error as e:
-            self.__logger.error("Can not add topic name: %s", e)
-
-    def get(self, chat_id, topic_id) -> str | None:
-        try:
-            with connect(self.__path) as con:
-                cursor = con.cursor()
-                cursor.execute(
-                    "SELECT topic_name FROM topics WHERE chat_id = ? and topic_id = ?",
-                    (chat_id, topic_id, )
-                )
-                row = cursor.fetchone()
-
-                if row:
-                    return row[0]
-
-                self.__logger.info(
-                    "Cache miss for: %s, %s", chat_id, topic_id
-                )
-        except Error as e:
-            self.__logger.error("Can not get topic name: %s", e)
 
 
 class Cache():

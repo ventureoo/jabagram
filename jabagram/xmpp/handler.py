@@ -22,7 +22,8 @@ import re
 
 from functools import lru_cache
 
-from jabagram.cache import Cache, StickerCache
+from jabagram.cache import Cache
+from jabagram.database.stickers import StickerCache
 from jabagram.messages import Messages
 from jabagram.model import ChatHandler, Event, Message, Attachment, Sticker
 from pathlib import Path

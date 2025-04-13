@@ -19,9 +19,8 @@
 import asyncio
 from asyncio import Queue
 import logging
-from typing import Dict
 
-from jabagram.database import Database
+from jabagram.database.chats import ChatStorage
 from jabagram.model import (
     Attachment,
     ChatHandler,
@@ -35,11 +34,11 @@ from jabagram.model import (
 class MessageDispatcher():
     """ A class that dispatches messages/events/etc between chat handlers """
 
-    def __init__(self, database: Database):
+    def __init__(self, storage: ChatStorage):
         self.__loop = asyncio.get_event_loop()
-        self.__chat_map: Dict[str, ChatHandler] = {}
+        self.__chat_map: dict[str, ChatHandler] = {}
         self.__event_queue: Queue[Forwardable] = Queue(maxsize=100)
-        self.__database = database
+        self.__storage = storage
         self.__logger = logging.getLogger(self.__class__.__name__)
 
     async def start(self):
@@ -80,7 +79,7 @@ class MessageDispatcher():
                     await handler.unbridge()
                     del self.__chat_map[forwardable.address]
                     del self.__chat_map[handler.address]
-                    self.__database.remove(handler.address)
+                    self.__storage.remove(handler.address)
 
     async def send(self, forwardable: Forwardable):
         """Put event inside event queue"""

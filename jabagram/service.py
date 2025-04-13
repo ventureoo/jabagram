@@ -17,82 +17,19 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import logging
-import sqlite3
-from sqlite3 import Error, connect
-from typing import Dict, List
-
 from jabagram.cache import Cache
 from jabagram.model import ChatHandlerFactory
-
-class Database():
-    def __init__(self, path):
-        self.__path = path
-        self.__logger = logging.getLogger(self.__class__.__name__)
-
-    def create(self) -> bool:
-        try:
-            with connect(self.__path) as con:
-                cursor = con.cursor()
-                cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS chats(telegram_id, muc)"
-                )
-                cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS stickers(file_id PRIMARY KEY, xmpp_url NOT NULL)"
-                )
-                cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS topics(chat_id, topic_id, topic_name NOT NULL)"
-                )
-                con.commit()
-            return True
-        except Error as e:
-            self.__logger.error("Can't initialize the database: %s", e)
-
-        return False
-
-    def add(self, chat: str, muc: str) -> None:
-        try:
-            with connect(self.__path) as con:
-                cursor = con.cursor()
-                cursor.execute(
-                    "INSERT INTO chats(telegram_id, muc) VALUES (?, ?)",
-                    (chat, muc)
-                )
-                con.commit()
-        except Error as e:
-            self.__logger.error("Can not add chats pair: %s", e)
-
-    def get_chats(self) -> List:
-        res = []
-        try:
-            with sqlite3.connect(self.__path) as con:
-                cursor = con.cursor()
-                for row in cursor.execute("SELECT telegram_id,muc FROM chats"):
-                    res.append(row)
-
-        except Error as e:
-            self.__logger.error("Can't add chats pair: %s", e)
-
-        return res
-
-    def remove(self, chat: str):
-        try:
-            with sqlite3.connect(self.__path) as con:
-                cursor = con.cursor()
-                cursor.execute(
-                    "DELETE FROM chats WHERE telegram_id = ? OR muc = ?", (chat,)
-                )
-        except Error as e:
-            self.__logger.error("Can't remove chats: %s", e)
+from jabagram.database.chats import ChatStorage
 
 class ChatService():
     def __init__(
         self,
-        database: Database,
+        storage: ChatStorage,
         key: str
     ) -> None:
-        self.__database = database
-        self.__pending_chats: Dict[str, str] = {}
-        self.__factories: List[ChatHandlerFactory] = []
+        self.__storage = storage
+        self.__pending_chats: dict[str, str] = {}
+        self.__factories: list[ChatHandlerFactory] = []
         self.__key = key
         self.__logger = logging.getLogger(__class__.__name__)
 
@@ -107,7 +44,7 @@ class ChatService():
             return
 
         self.__logger.info('New chat pair binded: %s - %s', muc, telegram_id)
-        self.__database.add(telegram_id, muc)
+        self.__storage.add(telegram_id, muc)
         del self.__pending_chats[muc]
         await self.__spawn_handlers(telegram_id, muc)
 
@@ -125,7 +62,7 @@ class ChatService():
 
     async def load_chats(self) -> None:
         self.__logger.info("Loading chats from database...")
-        chats = self.__database.get_chats()
+        chats = self.__storage.get() or []
 
         for chat in chats:
             telegram_id, muc = chat
