@@ -251,10 +251,12 @@ class TelegramClient(ChatHandlerFactory):
 
     async def __process_message(self, raw_message: dict, edit=False) -> None:
         chat_id = str(raw_message['chat']['id'])
+        message_id = str(raw_message['message_id'])
         sender: str = self.__get_full_name(raw_message['from'])
         text: str | None = raw_message.get(
             "text") or raw_message.get("caption")
         reply: str | None = self.__get_reply(raw_message)
+        forward: dict | None = raw_message.get('forward_origin')
         attachment: TelegramAttachment | None = self.__extract_attachment(
             sender, raw_message
         )
@@ -262,8 +264,6 @@ class TelegramClient(ChatHandlerFactory):
 
         if topic_name:
             sender += " [" + topic_name + "]"
-
-        message_id = str(raw_message['message_id'])
 
         if attachment:
             async def url_callback():
@@ -311,6 +311,19 @@ class TelegramClient(ChatHandlerFactory):
                 )
 
         if text:
+            if forward:
+                original_sender = "Unknown"
+
+                match forward:
+                    case {"chat": chat} | {"sender_chat": chat}:
+                        original_sender = chat['title']
+                    case {"sender_user": user}:
+                        original_sender = self.__get_full_name(user)
+                    case {"sender_user_name": name}:
+                        original_sender = name
+
+                text = f"**Message forwarded from {original_sender}**\n\n{text}"
+
             await self.__disptacher.send(
                 Message(
                     event_id=message_id,
