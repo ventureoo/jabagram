@@ -41,7 +41,7 @@ class Event(Forwardable):
 @dataclass(kw_only=True)
 class Message(Event):
     sender: str
-    reply: Optional[str] = None
+    reply: Optional[str] = field(repr=False, default=None)
     edit: Optional[bool] = False
 
 
