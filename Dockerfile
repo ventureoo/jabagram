@@ -5,9 +5,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN apt update -y && apt upgrade -y
 RUN apt install -y sqlite3
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip3 install --upgrade slixmpp
-RUN pip3 install --upgrade aiohttp
+RUN pip install --upgrade --no-cache-dir -r requirements.txt
 COPY . ./
 
 ENTRYPOINT [ "python", "./jabagram.py" ]
