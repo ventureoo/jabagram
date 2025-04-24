@@ -22,10 +22,16 @@ import re
 
 from functools import lru_cache
 
-from jabagram.cache import Cache
+from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
 from jabagram.messages import Messages
-from jabagram.model import ChatHandler, Event, Message, Attachment, Sticker
+from jabagram.model import (
+    Attachment,
+    ChatHandler,
+    Sticker,
+    Event,
+    Message,
+)
 from pathlib import Path
 from slixmpp.clientxmpp import ClientXMPP
 from slixmpp.exceptions import IqTimeout
@@ -56,14 +62,14 @@ class XmppRoomHandler(ChatHandler):
         self,
         address: str,
         client: ClientXMPP,
-        cache: Cache,
+        message_storage: MessageStorage,
         sticker_cache: StickerCache,
         messages: Messages
     ) -> None:
         super().__init__(address)
         self.__client = client
         self.__muc = JID(address)
-        self.__cache = cache
+        self.__message_storage = message_storage
         self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
         self.__sticker_cache = sticker_cache
         self.__messages = messages
@@ -87,7 +93,7 @@ class XmppRoomHandler(ChatHandler):
             self.__logger.error("Failed to change nickname to: %s", sender)
 
     async def send_message(self, message: Message) -> None:
-        self.__logger.info("Sending message with id: %s", message.event_id)
+        self.__logger.info("Sending message with id: %s", message.id)
 
         params = {
             "mto": self.__muc,
@@ -101,9 +107,15 @@ class XmppRoomHandler(ChatHandler):
 
         await self.__change_nick(message.sender)
         msg = self.__client.make_message(**params)
-        self.__cache.reply_map.add(message.content, message.event_id)
-        self.__cache.message_ids.add(message.event_id, msg['id'])
         msg.send()
+        self.__message_storage.add(
+            chat_id=int(message.chat.address),
+            muc=str(self.__muc),
+            stanza_id=msg['id'],
+            telegram_id=message.id,
+            body=message.content,
+            topic_id=message.chat.topic_id
+        )
 
     async def send_attachment(self, attachment: Attachment) -> None:
         url = None
@@ -150,6 +162,7 @@ class XmppRoomHandler(ChatHandler):
                         self.__sticker_cache.add(
                             attachment.file_id, url
                         )
+
             except (HTTPError, aiohttp.ClientConnectionError, IqTimeout) as error:
                 self.__logger.error("Cannot upload file: %s", error)
                 return
@@ -178,12 +191,17 @@ class XmppRoomHandler(ChatHandler):
         message.send()
 
     async def edit_message(self, message: Message) -> None:
-        stanza = self.__cache.message_ids.get(message.event_id)
+        result = self.__message_storage.get_by_id(
+            chat_id=int(message.chat.address),
+            muc=str(self.__muc),
+            topic_id=message.chat.topic_id,
+            message_id=message.id
+        )
 
-        if not stanza:
+        if not result:
             self.__logger.info(
                 "Failed to found stanza for event: %s",
-                message.event_id
+                message.id
             )
             return
 
@@ -199,7 +217,7 @@ class XmppRoomHandler(ChatHandler):
 
         await self.__change_nick(message.sender)
         msg = self.__client.make_message(**params)
-        msg['replace']['id'] = stanza
+        msg['replace']['id'] = result.stanza_id
         msg.send()
 
     async def send_event(self, event: Event) -> None:

@@ -20,13 +20,14 @@ import asyncio
 import logging
 
 from datetime import datetime
-from jabagram.cache import Cache
+from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.messages import Messages
 from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
+    Chat,
     ChatHandlerFactory,
     Message,
 )
@@ -46,6 +47,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         service: ChatService,
         disptacher: MessageDispatcher,
         sticker_cache: StickerCache,
+        message_storage: MessageStorage,
         messages: Messages
     ) -> None:
         ClientXMPP.__init__(self, jid, password)
@@ -53,7 +55,8 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.__logger = logging.getLogger(self.__class__.__name__)
         self.__dispatcher = disptacher
         self.__sticker_cache = sticker_cache
-        self.__mucs = []
+        self.__message_storage = message_storage
+        self.__messages = messages
 
         # Used XEPs
         xeps = ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
@@ -71,9 +74,11 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         )
         self.add_event_handler("disconnected", self.__on_connection_reset)
         self.add_event_handler("connected", self.__on_connected)
+
         self.__reconnecting = False
+        self.__mucs = []
+
         self.__service.register_factory(self)
-        self.__messages = messages
 
     async def start(self):
         self.connect()
@@ -82,13 +87,12 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self,
         address: str,
         muc: str,
-        cache: Cache,
     ) -> None:
         handler = XmppRoomHandler(
             address=muc,
             client=self,
-            cache=cache,
             sticker_cache=self.__sticker_cache,
+            message_storage=self.__message_storage,
             messages=self.__messages
         )
 
@@ -178,13 +182,13 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
 
             fname = url.split("/")[-1]
             attachment = Attachment(
-                event_id=message_id,
-                address=muc,
+                id=message_id,
+                chat=Chat(address=str(muc)),
                 sender=sender,
                 url_callback=url_callback,
                 content=fname,
                 mime=None,
-                fsize=None
+                fsize=None,
             )
             await self.__dispatcher.send(attachment)
         else:
@@ -201,12 +205,12 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
                 content = body
 
             message = Message(
-                address=muc,
+                id=message_id,
+                chat=Chat(address=muc),
                 content=content,
                 reply=reply,
                 edit=is_edit,
                 sender=sender,
-                event_id=message_id
             )
             await self.__dispatcher.send(message)
 

@@ -48,12 +48,12 @@ class MessageDispatcher():
         while True:
             forwardable: Forwardable = await self.__event_queue.get()
             handler: ChatHandler | None = self.__chat_map.get(
-                forwardable.address
+                forwardable.chat.address
             )
             self.__logger.info("Received event: %s", forwardable)
             if not handler:
                 self.__logger.error(
-                    "Unhandled event for chat: %s", forwardable.address
+                    "Unhandled event for chat: %s", forwardable.chat.address
                 )
                 continue
 
@@ -77,7 +77,7 @@ class MessageDispatcher():
                     )
                 case UnbridgeEvent():
                     await handler.unbridge()
-                    del self.__chat_map[forwardable.address]
+                    del self.__chat_map[forwardable.chat.address]
                     del self.__chat_map[handler.address]
                     self.__storage.remove(handler.address)
 

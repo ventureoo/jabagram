@@ -17,7 +17,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import logging
-from jabagram.cache import Cache
+
 from jabagram.model import ChatHandlerFactory
 from jabagram.database.chats import ChatStorage
 
@@ -49,13 +49,12 @@ class ChatService():
         await self.__spawn_handlers(telegram_id, muc)
 
     async def __spawn_handlers(self, telegram_id, muc):
-        cache = Cache(100)
         self.__logger.info(
             "Create handlers for chat %s and MUC: %s", telegram_id, muc
         )
         # Notify all factories to create chat message handlers
         for factory in self.__factories:
-            await factory.create_handler(telegram_id, muc, cache)
+            await factory.create_handler(telegram_id, muc)
 
     def register_factory(self, factory: ChatHandlerFactory) -> None:
         self.__factories.append(factory)

@@ -22,6 +22,7 @@ import configparser
 import logging
 
 from jabagram.database.chats import ChatStorage
+from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
 from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
@@ -82,39 +83,43 @@ def main():
         chat_storage = ChatStorage(path=args.data)
         sticker_cache = StickerCache(path=args.data)
         topic_name_cache = TopicNameCache(path=args.data)
+        message_storage = MessageStorage(path=args.data)
 
         if not all([
             chat_storage.create(),
             sticker_cache.create(),
-            topic_name_cache.create()
+            topic_name_cache.create(),
+            message_storage.create()
         ]):
             logger.error("Error when working with the database, interrupt...")
             return
 
         loop = asyncio.get_event_loop()
 
-        service: ChatService = ChatService(
+        service = ChatService(
             storage=chat_storage,
             key=config.get("general", "key")
         )
-        dispatcher: MessageDispatcher = MessageDispatcher(
+        dispatcher = MessageDispatcher(
             storage=chat_storage
         )
         telegram = TelegramClient(
-            config.get("telegram", "token"),
-            config.get("xmpp", "login"),
-            service,
-            dispatcher,
-            topic_name_cache,
-            messages
+            token=config.get("telegram", "token"),
+            jid=config.get("xmpp", "login"),
+            service=service,
+            dispatcher=dispatcher,
+            message_storage=message_storage,
+            topic_name_cache=topic_name_cache,
+            messages=messages
         )
         xmpp = XmppClient(
-            config.get("xmpp", "login"),
-            config.get("xmpp", "password"),
-            service,
-            dispatcher,
-            sticker_cache,
-            messages
+            jid=config.get("xmpp", "login"),
+            password=config.get("xmpp", "password"),
+            service=service,
+            disptacher=dispatcher,
+            sticker_cache=sticker_cache,
+            message_storage=message_storage,
+            messages=messages
         )
         loop.create_task(telegram.start())
         loop.create_task(xmpp.start())

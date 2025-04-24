@@ -19,21 +19,22 @@
 import logging
 import mimetypes
 
-from jabagram.cache import Cache
+from jabagram.database.messages import MessageStorage
 from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.messages import Messages
 from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
+    Chat,
     ChatHandlerFactory,
     Message,
     Sticker,
-    TelegramAttachment,
     UnbridgeEvent,
 )
 from jabagram.telegram.api import TelegramApi, TelegramApiError
 from jabagram.telegram.handler import TelegramChatHandler
+from jabagram.telegram.model import TelegramAttachment
 from slixmpp.jid import InvalidJID, JID
 
 class TelegramClient(ChatHandlerFactory):
@@ -44,6 +45,7 @@ class TelegramClient(ChatHandlerFactory):
         service: ChatService,
         dispatcher: MessageDispatcher,
         topic_name_cache: TopicNameCache,
+        message_storage: MessageStorage,
         messages: Messages
     ) -> None:
         self.__api: TelegramApi = TelegramApi(token)
@@ -52,21 +54,21 @@ class TelegramClient(ChatHandlerFactory):
         self.__logger = logging.getLogger(__class__.__name__)
         self.__disptacher: MessageDispatcher = dispatcher
         self.__service: ChatService = service
-        self.__service.register_factory(self)
         self.__messages = messages
         self.__handlers: dict[int, TelegramChatHandler] = {}
         self.__topic_name_cache = topic_name_cache
+        self.__message_storage = message_storage
+        self.__service.register_factory(self)
 
     async def create_handler(
         self,
         address: str,
         muc: str,
-        cache: Cache,
     ) -> None:
         handler = TelegramChatHandler(
             address=address,
             api=self.__api,
-            cache=cache,
+            message_storage=self.__message_storage,
             messages=self.__messages
         )
         self.__handlers[int(address)] = handler
@@ -260,6 +262,7 @@ class TelegramClient(ChatHandlerFactory):
         attachment: TelegramAttachment | None = self.__extract_attachment(
             sender, raw_message
         )
+        topic_id = raw_message.get("message_thread_id")
         topic_name: str | None = self.__extract_topic_name(raw_message)
 
         if topic_name:
@@ -284,21 +287,21 @@ class TelegramClient(ChatHandlerFactory):
             if attachment.is_cacheable:
                 await self.__disptacher.send(
                     Sticker(
-                        event_id=message_id,
+                        id=message_id,
                         content=attachment.fname,
-                        address=chat_id,
+                        chat=Chat(address=chat_id, topic_id=topic_id),
                         sender=sender,
                         file_id=attachment.file_unique_id,
                         mime=attachment.mime,
                         fsize=attachment.fsize,
-                        url_callback=url_callback
+                        url_callback=url_callback,
                     )
                 )
             else:
                 await self.__disptacher.send(
                     Attachment(
-                        event_id=message_id,
-                        address=chat_id,
+                        id=message_id,
+                        chat=Chat(address=chat_id, topic_id=topic_id),
                         sender=sender,
                         content=attachment.fname,
                         # if we have text, reply should be nested
@@ -306,7 +309,7 @@ class TelegramClient(ChatHandlerFactory):
                         reply=None if text else reply,
                         mime=attachment.mime,
                         fsize=attachment.fsize,
-                        url_callback=url_callback
+                        url_callback=url_callback,
                     )
                 )
 
@@ -326,12 +329,12 @@ class TelegramClient(ChatHandlerFactory):
 
             await self.__disptacher.send(
                 Message(
-                    event_id=message_id,
-                    address=chat_id,
+                    id=message_id,
+                    chat=Chat(address=chat_id, topic_id=topic_id),
                     content=text,
                     sender=sender,
                     reply=reply,
-                    edit=edit
+                    edit=edit,
                 )
             )
 
@@ -339,7 +342,11 @@ class TelegramClient(ChatHandlerFactory):
         new_state = chat_member.get("new_chat_member")
         if new_state and new_state.get("status") == "left":
             await self.__disptacher.send(
-                UnbridgeEvent(address=str(chat_member['chat']['id']))
+                UnbridgeEvent(
+                    chat=Chat(
+                        address=str(chat_member['chat']['id'])
+                    )
+                )
             )
 
     def __get_full_name(self, user: dict) -> str:
@@ -356,12 +363,8 @@ class TelegramClient(ChatHandlerFactory):
         chat_id = message['chat']['id']
         topic_id = message.get("message_thread_id")
 
-        if not topic_id:
+        if topic_id is None:
             return None
-
-        handler = self.__handlers.get(message['chat']['id'])
-        if handler:
-            handler.add_topic_id(message['message_id'], topic_id)
 
         topic_name = self.__topic_name_cache.get(chat_id, topic_id)
 

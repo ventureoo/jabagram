@@ -20,13 +20,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from jabagram.cache import Cache
-
+@dataclass(kw_only=True)
+class Chat():
+    address: str
+    topic_id: Optional[int] = None
 
 @dataclass(kw_only=True)
 class Forwardable():
-    address: str
-
+    chat: Chat
 
 @dataclass(kw_only=True)
 class UnbridgeEvent(Forwardable):
@@ -34,9 +35,8 @@ class UnbridgeEvent(Forwardable):
 
 @dataclass(kw_only=True)
 class Event(Forwardable):
-    event_id: str
+    id: str
     content: str = field(repr=False)
-
 
 @dataclass(kw_only=True)
 class Message(Event):
@@ -44,28 +44,15 @@ class Message(Event):
     reply: Optional[str] = field(repr=False, default=None)
     edit: Optional[bool] = False
 
-
 @dataclass(kw_only=True)
 class Attachment(Message):
     url_callback: Callable = field(repr=False)
     mime: Optional[str] = None
     fsize: Optional[int] = None
 
-
-@dataclass(kw_only=True)
-class TelegramAttachment():
-    is_cacheable: bool = False
-    file_id: str
-    file_unique_id: str
-    fname: str
-    mime: Optional[str] = None
-    fsize: Optional[int] = None
-
-
 @dataclass(kw_only=True)
 class Sticker(Attachment):
     file_id: str
-
 
 class ChatHandler(ABC):
     def __init__(self, address: str) -> None:
@@ -102,6 +89,5 @@ class ChatHandlerFactory(ABC):
         self,
         address: str,
         muc: str,
-        cache: Cache,
     ) -> None:
         pass
