@@ -94,7 +94,8 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
                 maxstanzas=0
             )
             self.__logger.info(
-                "Successfully joined to the room %s"
+                "Successfully joined to the room %s",
+                muc
             )
             return True
         except PresenceError as error:
