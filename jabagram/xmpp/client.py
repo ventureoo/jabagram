@@ -83,6 +83,26 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
     async def start(self):
         self.connect()
 
+    async def __try_to_join(self, muc: str) -> bool:
+        try:
+            self.__logger.info(
+                "Trying to join %s room...", muc
+            )
+            await self.plugin['xep_0045'].join_muc_wait(
+                JID(muc),
+                BRIDGE_DEFAULT_NAME,
+                maxstanzas=0
+            )
+            self.__logger.info(
+                "Successfully joined to the room %s"
+            )
+            return True
+        except PresenceError as error:
+            self.__logger.error("Failed to join muc: %s", error.text)
+
+        return False
+
+
     async def create_handler(
         self,
         address: str,
@@ -96,16 +116,9 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             messages=self.__messages
         )
 
-        try:
-            await self.plugin['xep_0045'].join_muc_wait(
-                JID(muc),
-                BRIDGE_DEFAULT_NAME,
-                maxstanzas=0
-            )
+        if (await self.__try_to_join(muc)):
             self.__mucs.append(muc)
             self.__dispatcher.add_handler(address, handler)
-        except PresenceError as error:
-            self.__logger.error("Failed to join muc: %s", error)
 
 
     async def __on_connection_reset(self, event):
@@ -123,23 +136,9 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         self.send_presence()
 
         if self.__reconnecting:
+            self.__logger.info("Trying to rejoining to rooms...")
             for muc in self.__mucs:
-                try:
-                    self.__logger.info(
-                        "Trying to rejoin %s room...", muc
-                    )
-                    await self.plugin['xep_0045'].join_muc_wait(
-                        JID(muc),
-                        BRIDGE_DEFAULT_NAME,
-                        maxstanzas=0
-                    )
-                    self.__logger.info(
-                        "Successfully rejoined to the room %s"
-                    )
-                except PresenceError as error:
-                    self.__logger.error(
-                        "Failed to re-join into MUC: %s", error
-                    )
+                await self.__try_to_join(muc)
         else:
             await self.__service.load_chats()
 
@@ -155,11 +154,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         room = message['from'].bare
         if message['error']['text'] == XMPP_OCCUPANT_ERROR \
                 and self.__dispatcher.is_bound(room):
-            await self.plugin['xep_0045'].join_muc_wait(
-                message['from'],
-                BRIDGE_DEFAULT_NAME,
-                maxstanzas=0
-            )
+            await self.__try_to_join(room)
 
     async def __process_message(self, message):
         sender = message['mucnick']
