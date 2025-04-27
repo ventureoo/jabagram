@@ -253,7 +253,7 @@ class TelegramChatHandler(ChatHandler):
 
         if not result:
             self.__logger.info(
-                "Failed to found telegram message id for event: %d",
+                "Failed to found telegram message id for event: %s",
                 message.id
             )
             return

@@ -76,7 +76,6 @@ class MessageStorage(SqliteTable):
         statement = (
             "SELECT telegram_id, stanza_id FROM messages WHERE"
             " chat_id = ? AND muc = ? AND (stanza_id = ? OR telegram_id = ?)"
-            " AND topic_id = ?"
         )
 
         args = (
