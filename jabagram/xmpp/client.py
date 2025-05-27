@@ -100,6 +100,8 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             return True
         except PresenceError as error:
             self.__logger.error("Failed to join muc: %s", error.text)
+        except TimeoutError:
+            self.__logger.error("Failed to join muc: max time exceeded")
 
         return False
 
