@@ -140,5 +140,5 @@ class MessageStorage(SqliteTable):
             )
             return None
 
-        return MessageIdEntry._make(message[0])
+        return MessageIdEntry._make(message[len(message) - 1])
 
