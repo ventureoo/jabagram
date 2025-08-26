@@ -39,7 +39,7 @@ class StickerCache(SqliteTable):
             file_id,
             xmpp_url,
             statement=(
-                "INSERT INTO stickers(file_id, xmpp_url) VALUES (?, ?) ON"
+                "INSERT INTO stickers(file_id, xmpp_url) VALUES (?, ?) ON "
                 "CONFLICT (file_id) DO UPDATE SET xmpp_url = excluded.xmpp_url"
             ),
             on_error_message="Failed to add sticker"
