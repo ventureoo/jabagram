@@ -103,6 +103,17 @@ def main():
         dispatcher = MessageDispatcher(
             storage=chat_storage
         )
+
+        actors_pool_size_limit = 16
+        try:
+            actors_pool_size_limit = int(
+                config.get("xmpp", "actors_pool_size_limit") or 16
+            )
+        except ValueError:
+            pass
+        except configparser.NoOptionError:
+            pass
+
         telegram = TelegramClient(
             token=config.get("telegram", "token"),
             jid=config.get("xmpp", "login"),
@@ -119,6 +130,7 @@ def main():
             disptacher=dispatcher,
             sticker_cache=sticker_cache,
             message_storage=message_storage,
+            actors_pool_size_limit=actors_pool_size_limit,
             messages=messages
         )
         loop.create_task(telegram.start())

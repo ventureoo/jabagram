@@ -34,21 +34,26 @@ class UnbridgeEvent(Forwardable):
     pass
 
 @dataclass(kw_only=True)
+class Sender():
+    name: str
+    id: str
+
+@dataclass(kw_only=True)
 class Event(Forwardable):
     id: str
     content: str = field(repr=False)
 
 @dataclass(kw_only=True)
 class Message(Event):
-    sender: str
-    reply: Optional[str] = field(repr=False, default=None)
-    edit: Optional[bool] = False
+    sender: Sender
+    reply: str | None = field(repr=False, default=None)
+    edit: bool | None = False
 
 @dataclass(kw_only=True)
 class Attachment(Message):
     url_callback: Callable = field(repr=False)
-    mime: Optional[str] = None
-    fsize: Optional[int] = None
+    mime: str | None = None
+    fsize: int | None = None
 
 @dataclass(kw_only=True)
 class Sticker(Attachment):
@@ -59,11 +64,11 @@ class ChatHandler(ABC):
         self.__address = address
 
     @abstractmethod
-    async def send_message(self, message: Message) -> None:
+    async def send_message(self, origin: Message) -> None:
         pass
 
     @abstractmethod
-    async def edit_message(self, message: Message) -> None:
+    async def edit_message(self, edited: Message) -> None:
         pass
 
     @abstractmethod

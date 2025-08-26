@@ -28,6 +28,7 @@ from jabagram.model import (
     Attachment,
     Chat,
     ChatHandlerFactory,
+    Sender,
     Message,
     Sticker,
     UnbridgeEvent,
@@ -242,7 +243,7 @@ class TelegramClient(ChatHandlerFactory):
         if not reply:
             return None
 
-        sender: str = self.__get_full_name(reply['from'])
+        sender, _ = self.__get_user(reply['from'])
         attachment = self.__extract_attachment(sender, reply)
         reply_body = reply.get("text") or reply.get("caption")
 
@@ -254,7 +255,7 @@ class TelegramClient(ChatHandlerFactory):
     async def __process_message(self, raw_message: dict, edit=False) -> None:
         chat_id = str(raw_message['chat']['id'])
         message_id = str(raw_message['message_id'])
-        sender: str = self.__get_full_name(raw_message['from'])
+        sender, sender_id = self.__get_user(raw_message['from'])
         text: str | None = raw_message.get(
             "text") or raw_message.get("caption")
         reply: str | None = self.__get_reply(raw_message)
@@ -267,6 +268,7 @@ class TelegramClient(ChatHandlerFactory):
 
         if topic_name:
             sender += " [" + topic_name + "]"
+            sender_id += f"_{topic_id}"
 
         if attachment:
             async def url_callback():
@@ -290,7 +292,7 @@ class TelegramClient(ChatHandlerFactory):
                         id=message_id,
                         content=attachment.fname,
                         chat=Chat(address=chat_id, topic_id=topic_id),
-                        sender=sender,
+                        sender=Sender(name=sender, id=sender_id),
                         file_id=attachment.file_unique_id,
                         mime=attachment.mime,
                         fsize=attachment.fsize,
@@ -302,7 +304,7 @@ class TelegramClient(ChatHandlerFactory):
                     Attachment(
                         id=message_id,
                         chat=Chat(address=chat_id, topic_id=topic_id),
-                        sender=sender,
+                        sender=Sender(name=sender, id=sender_id),
                         content=attachment.fname,
                         # if we have text, reply should be nested
                         # in the message below
@@ -321,7 +323,7 @@ class TelegramClient(ChatHandlerFactory):
                     case {"chat": chat} | {"sender_chat": chat}:
                         original_sender = chat['title']
                     case {"sender_user": user}:
-                        original_sender = self.__get_full_name(user)
+                        original_sender, _ = self.__get_user(user)
                     case {"sender_user_name": name}:
                         original_sender = name
 
@@ -332,7 +334,7 @@ class TelegramClient(ChatHandlerFactory):
                     id=message_id,
                     chat=Chat(address=chat_id, topic_id=topic_id),
                     content=text,
-                    sender=sender,
+                    sender=Sender(name=sender, id=sender_id),
                     reply=reply,
                     edit=edit,
                 )
@@ -349,12 +351,14 @@ class TelegramClient(ChatHandlerFactory):
                 )
             )
 
-    def __get_full_name(self, user: dict) -> str:
-        name: str = user['first_name']
+    def __get_user(self, user: dict) -> tuple[str, str]:
+        user_name: str = user['first_name']
         if user.get("last_name"):
-            name = name + " " + user['last_name']
+            user_name = user_name + " " + user['last_name']
 
-        return name
+        user_id = str(user['id'])
+
+        return user_name, user_id
 
     def __extract_topic_name(
         self,

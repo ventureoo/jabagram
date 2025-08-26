@@ -16,7 +16,6 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-import asyncio
 import logging
 
 from datetime import datetime
@@ -29,17 +28,16 @@ from jabagram.model import (
     Attachment,
     Chat,
     ChatHandlerFactory,
+    Sender,
     Message,
 )
+from jabagram.xmpp.actor import XmppActor, XmppActorFactory
 from jabagram.xmpp.handler import XmppRoomHandler
-from slixmpp import ClientXMPP, JID
-from slixmpp.exceptions import PresenceError
 
-BRIDGE_DEFAULT_NAME = "Telegram Bridge"
-XMPP_OCCUPANT_ERROR = "Only occupants are allowed to send messages to the conference"
+BRIDGE_DEAFAULT_ID = "listener"
+BRIDGE_DEAFAULT_NAME = "Telegram Bridge"
 
-
-class XmppClient(ClientXMPP, ChatHandlerFactory):
+class XmppClient(XmppActor, ChatHandlerFactory):
     def __init__(
         self,
         jid: str,
@@ -48,63 +46,31 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         disptacher: MessageDispatcher,
         sticker_cache: StickerCache,
         message_storage: MessageStorage,
-        messages: Messages
+        messages: Messages,
+        actors_pool_size_limit: int
     ) -> None:
-        ClientXMPP.__init__(self, jid, password)
-        self.__service = service
+        super().__init__(
+            jid=jid,
+            password=password,
+            user_id=BRIDGE_DEAFAULT_ID,
+            user_name=BRIDGE_DEAFAULT_NAME
+        )
         self.__logger = logging.getLogger(self.__class__.__name__)
+        self.__service = service
         self.__dispatcher = disptacher
         self.__sticker_cache = sticker_cache
         self.__message_storage = message_storage
         self.__messages = messages
+        self.__actor_factory = XmppActorFactory(
+            jid=jid,
+            password=password,
+            pool_size_limit=actors_pool_size_limit,
+            fallback=self
+        )
 
-        # Used XEPs
-        xeps = ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
-                'xep_0308', 'xep_0045', 'xep_0066', 'xep_0199')
-        list(map(self.register_plugin, xeps))
-
-        # Common event handlers
-        self.add_event_handler("session_start", self.__session_start)
         self.add_event_handler("groupchat_message", self.__process_message)
-        self.add_event_handler(
-            "groupchat_message_error", self.__process_errors
-        )
-        self.add_event_handler(
-            'groupchat_direct_invite', self.__invite_callback
-        )
-        self.add_event_handler("disconnected", self.__on_connection_reset)
-        self.add_event_handler("connected", self.__on_connected)
-
-        self.__reconnecting = False
-        self.__mucs = []
-
+        self.add_event_handler("groupchat_direct_invite", self.__invite_callback)
         self.__service.register_factory(self)
-
-    async def start(self):
-        self.connect()
-
-    async def __try_to_join(self, muc: str) -> bool:
-        try:
-            self.__logger.info(
-                "Trying to join %s room...", muc
-            )
-            await self.plugin['xep_0045'].join_muc_wait(
-                JID(muc),
-                BRIDGE_DEFAULT_NAME,
-                maxstanzas=0
-            )
-            self.__logger.info(
-                "Successfully joined to the room %s",
-                muc
-            )
-            return True
-        except PresenceError as error:
-            self.__logger.error("Failed to join muc: %s", error.text)
-        except TimeoutError:
-            self.__logger.error("Failed to join muc: max time exceeded")
-
-        return False
-
 
     async def create_handler(
         self,
@@ -112,64 +78,39 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
         muc: str,
     ) -> None:
         handler = XmppRoomHandler(
+            main_actor=self,
             address=muc,
-            client=self,
             sticker_cache=self.__sticker_cache,
             message_storage=self.__message_storage,
-            messages=self.__messages
+            messages=self.__messages,
+            actor_factory=self.__actor_factory
         )
 
-        if (await self.__try_to_join(muc)):
-            self.__mucs.append(muc)
+        if (await self.join(muc)):
             self.__dispatcher.add_handler(address, handler)
 
+    async def _session_start(self, _):
+        _ = await super()._session_start(_)
 
-    async def __on_connection_reset(self, event):
-        self.__logger.warning(
-            "Connection reset: %s. Attempting to reconnect...", event)
-        self.__reconnecting = True
-
-        # Wait for synchronous handlers
-        await asyncio.sleep(5)
-
-        self.connect()
-
-    async def __session_start(self, _):
-        await self.get_roster()
-        self.send_presence()
-
-        if self.__reconnecting:
-            self.__logger.info("Trying to rejoining to rooms...")
-            for muc in self.__mucs:
-                await self.__try_to_join(muc)
-        else:
+        if not self._reconnecting:
             await self.__service.load_chats()
-
-    async def __on_connected(self, _):
-        self.__logger.info("Successfully connected.")
 
     async def __invite_callback(self, invite):
         muc = str(invite['groupchat_invite']['jid'])
-        key = invite['groupchat_invite']['reason']
+        key: str = invite['groupchat_invite']['reason']
         await self.__service.bind(muc, key)
 
-    async def __process_errors(self, message):
-        room = message['from'].bare
-        if message['error']['text'] == XMPP_OCCUPANT_ERROR \
-                and self.__dispatcher.is_bound(room):
-            await self.__try_to_join(room)
 
     async def __process_message(self, message):
-        sender = message['mucnick']
-        message_id = message['id']
-        muc = message['mucroom']
-        text = message['body'].strip()
+        sender: str = message['mucnick']
+        message_id: str = message['id']
+        muc: str = message['mucroom']
+        text: str = message['body'].strip()
 
         if not self.__dispatcher.is_bound(muc):
             return
 
-        if sender.endswith("(Telegram)") or \
-                sender == BRIDGE_DEFAULT_NAME:
+        if sender.endswith("(Telegram)") or sender == BRIDGE_DEAFAULT_NAME:
             return
 
         if message['oob']['url']:
@@ -178,11 +119,11 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             async def url_callback():
                 return url
 
-            fname = url.split("/")[-1]
+            fname: str = url.split("/")[-1]
             attachment = Attachment(
                 id=message_id,
                 chat=Chat(address=str(muc)),
-                sender=sender,
+                sender=Sender(name=sender, id=""),
                 url_callback=url_callback,
                 content=fname,
                 mime=None,
@@ -194,7 +135,7 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             is_edit = False
 
             if message['replace']['id']:
-                message_id = message['replace']['id']
+                message_id: str = message['replace']['id']
                 is_edit = True
 
             reply, body = self.__parse_reply(text)
@@ -205,10 +146,10 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             message = Message(
                 id=message_id,
                 chat=Chat(address=muc),
+                sender=Sender(name=sender, id=""),
                 content=content,
                 reply=reply,
-                edit=is_edit,
-                sender=sender,
+                edit=is_edit
             )
             await self.__dispatcher.send(message)
 
@@ -219,8 +160,8 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
             except IndexError:
                 return None
 
-        replies = []
-        parts = []
+        replies: list[str] = []
+        parts: list[str] = []
 
         for line in message.splitlines():
             if _safe_get(line, 0) == ">":
@@ -237,10 +178,10 @@ class XmppClient(ClientXMPP, ChatHandlerFactory):
                 # Attempt to detect a replies format of some mobile clients
                 # that add time and sender name of the message sent
                 try:
-                    datetime.strptime(line, '%Y-%m-%d  %H:%M (GMT%z)')
+                    _ = datetime.strptime(line, '%Y-%m-%d  %H:%M (GMT%z)')
 
                     # Remove sender name of message being replied to
-                    replies.pop()
+                    _ = replies.pop()
                 except ValueError:
                     replies.append(line)
             else:

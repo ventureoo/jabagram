@@ -88,26 +88,26 @@ class TelegramChatHandler(ChatHandler):
     def add_topic_id(self, message_id: int, topic_id: int):
         self.__topic_ids_cache[message_id] = topic_id
 
-    async def send_message(self, message: Message) -> None:
+    async def send_message(self, origin: Message) -> None:
         params: dict[str, Any] = {
-            "text": f"{message.sender}: {message.content}",
+            "text": f"{origin.sender.name}: {origin.content}",
             "chat_id": self.address,
-            "entities": self.__make_bold_sender_name(message.sender)
+            "entities": self.__make_bold_sender_name(origin.sender.name)
         }
 
-        if message.reply:
+        if origin.reply:
             result: MessageIdEntry | None = self.__message_storage.get_by_body(
                 chat_id=int(self.__address),
                 topic_id=None,
-                muc=message.chat.address,
-                body=message.reply,
+                muc=origin.chat.address,
+                body=origin.reply,
             )
             if result:
-                params["text"] = f"{message.sender}: {message.content}"
+                params["text"] = f"{origin.sender.name}: {origin.content}"
                 params["reply_to_message_id"] = result.telegram_id
 
                 entry: TopicTimeoutEntry | None = self.__residence_map.get(
-                    message.sender
+                    origin.sender.name
                 )
 
                 topic_id = self.__topic_ids_cache.get(result.telegram_id)
@@ -122,25 +122,25 @@ class TelegramChatHandler(ChatHandler):
                         entry.time = datetime.now()
             else:
                 params["text"] = (
-                    f"{message.reply}\n"
-                    f"{message.sender}: {message.content}"
+                    f"{origin.reply}\n"
+                    f"{origin.sender.name}: {origin.content}"
                 )
                 format = [
                     {
                         "type": "blockquote",
                         "offset": 0,
-                        "length": len(message.reply)
+                        "length": len(origin.reply)
                     },
                     {
                         "type": "bold",
-                        "offset": len(message.reply) + 1,
-                        "length": len(message.sender)
+                        "offset": len(origin.reply) + 1,
+                        "length": len(origin.sender.name)
                     }
                 ]
                 params["entities"] = dumps(format)
         else:
             entry: TopicTimeoutEntry | None = self.__residence_map.get(
-                message.sender
+                origin.sender.name
             )
             if entry and self.__is_time_left(entry.time, TELEGRAM_TOPIC_TIMEOUT):
                 params["message_thread_id"] = entry.topic_id
@@ -150,10 +150,10 @@ class TelegramChatHandler(ChatHandler):
             response = await self.__api.sendMessage(**params)
             self.__message_storage.add(
                 chat_id=int(self.__address),
-                muc=message.chat.address,
-                stanza_id=message.id,
+                muc=origin.chat.address,
+                stanza_id=origin.id,
                 telegram_id=response['message_id'],
-                body=message.content,
+                body=origin.content,
                 topic_id=response.get("message_thread_id")
             )
         except TelegramApiError as error:
@@ -181,14 +181,14 @@ class TelegramChatHandler(ChatHandler):
                     method = self.__api.sendDocument
                     params: dict[str, Any] = {
                         "chat_id": self.address,
-                        "caption": f"{attachment.sender}: ",
+                        "caption": f"{attachment.sender.name}: ",
                         "caption_entities": self.__make_bold_sender_name(
-                            attachment.sender
+                            attachment.sender.name
                         ),
                     }
 
                     entry: TopicTimeoutEntry | None = self.__residence_map.get(
-                        attachment.sender
+                        attachment.sender.name
                     )
                     if entry and self.__is_time_left(
                         entry.time, TELEGRAM_TOPIC_TIMEOUT
@@ -228,7 +228,7 @@ class TelegramChatHandler(ChatHandler):
                                 text=(
                                     "Couldn't transfer file"
                                     f"{attachment.content} "
-                                    f"from {attachment.sender}"
+                                    f"from {attachment.sender.name}"
                                 )
                             )
                         except TelegramApiError as send_message_error:
@@ -243,52 +243,52 @@ class TelegramChatHandler(ChatHandler):
         except ClientConnectionError as error:
             self.__logger.error("Failed to upload attachment: %s", error)
 
-    async def edit_message(self, message: Message) -> None:
+    async def edit_message(self, edited: Message) -> None:
         result = self.__message_storage.get_by_id(
             chat_id=int(self.__address),
             topic_id=None,
-            muc=message.chat.address,
-            message_id=message.id
+            muc=edited.chat.address,
+            message_id=edited.id
         )
 
         if not result:
             self.__logger.info(
                 "Failed to found telegram message id for event: %s",
-                message.id
+                edited.id
             )
             return
 
         params = {
             "chat_id": self.address,
-            "text": f"{message.sender}: {message.content}",
+            "text": f"{edited.sender}: {edited.content}",
             "message_id": result.telegram_id,
-            "entities": self.__make_bold_sender_name(message.sender)
+            "entities": self.__make_bold_sender_name(edited.sender.name)
         }
 
-        if message.reply:
+        if edited.reply:
             # Be sure that replies to messages was sent as native in Telegram
             if self.__message_storage.get_by_body(
                 chat_id=int(self.__address),
-                topic_id=message.chat.topic_id,
-                muc=message.chat.address,
-                body=message.reply
+                topic_id=edited.chat.topic_id,
+                muc=edited.chat.address,
+                body=edited.reply
             ):
-                params["text"] = f"{message.sender}: {message.content}"
+                params["text"] = f"{edited.sender}: {edited.content}"
             else:
                 params["text"] = (
-                    f"{message.reply}\n"
-                    f"{message.sender}: {message.content}"
+                    f"{edited.reply}\n"
+                    f"{edited.sender}: {edited.content}"
                 )
                 format = [
                     {
                         "type": "blockquote",
                         "offset": 0,
-                        "length": len(message.reply)
+                        "length": len(edited.reply)
                     },
                     {
                         "type": "bold",
-                        "offset": len(message.reply) + 1,
-                        "length": len(message.sender)
+                        "offset": len(edited.reply) + 1,
+                        "length": len(edited.sender.name)
                     }
                 ]
                 params["entities"] = dumps(format)
@@ -296,10 +296,10 @@ class TelegramChatHandler(ChatHandler):
             response = await self.__api.editMessageText(**params)
             self.__message_storage.add(
                 chat_id=int(self.__address),
-                muc=message.chat.address,
-                stanza_id=message.id,
+                muc=edited.chat.address,
+                stanza_id=edited.id,
                 telegram_id=response['message_id'],
-                body=message.content,
+                body=edited.content,
                 topic_id=response.get("message_thread_id")
             )
         except TelegramApiError as error:

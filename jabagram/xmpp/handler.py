@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2024 Vasiliy Stelmachenok <ventureo@yandex.ru>
+# Copyright (C) 2025 Vasiliy Stelmachenok <ventureo@yandex.ru>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,10 +17,6 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 import aiohttp
 import logging
-import stringprep
-import re
-
-from functools import lru_cache
 
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
@@ -28,93 +24,64 @@ from jabagram.messages import Messages
 from jabagram.model import (
     Attachment,
     ChatHandler,
-    Sticker,
     Event,
     Message,
+    Sticker,
 )
+from jabagram.xmpp.actor import XmppActorFactory, XmppActor
+
 from pathlib import Path
-from slixmpp.clientxmpp import ClientXMPP
 from slixmpp.exceptions import IqTimeout
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
-from unidecode import unidecode
-
-# XMPP does not support all available characters for resourcepart in JIDs, so
-# we need to filter a range of characters.
-BLACKLIST_USERNAME_CHARS = (
-    stringprep.in_table_c12,
-    stringprep.in_table_c21,
-    stringprep.in_table_c22,
-    stringprep.in_table_c3,
-    stringprep.in_table_c4,
-    stringprep.in_table_c5,
-    stringprep.in_table_c6,
-    stringprep.in_table_c7,
-    stringprep.in_table_c8,
-    stringprep.in_table_a1,
-    stringprep.in_table_c9
-)
-BRIDGE_DEFAULT_NAME = "Telegram Bridge"
-RTL_CHAR_PATTERN = re.compile(r'[\u0590-\u05FF\u0600-\u06FF]')
 
 class XmppRoomHandler(ChatHandler):
     def __init__(
         self,
         address: str,
-        client: ClientXMPP,
+        main_actor: XmppActor,
+        actor_factory: XmppActorFactory,
         message_storage: MessageStorage,
         sticker_cache: StickerCache,
         messages: Messages
     ) -> None:
         super().__init__(address)
-        self.__client = client
+        self.__main_actor = main_actor
+        self.__actor_factory = actor_factory
         self.__muc = JID(address)
         self.__message_storage = message_storage
-        self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
         self.__sticker_cache = sticker_cache
         self.__messages = messages
-        self.__muc_handle = client.plugin['xep_0045']
-        self.__last_sender = BRIDGE_DEFAULT_NAME
+        self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
 
-    async def __change_nick(self, sender: str):
-        sender = self.__validate_name(sender) + " (Telegram)"
+    async def send_message(self, origin: Message) -> None:
+        self.__logger.info("Sending message with id: %s", origin.id)
 
-        if sender == self.__last_sender:
-            return
+        mbody = origin.content
 
-        self.__logger.debug("Changing nick to %s", sender)
-        try:
-            self.__last_sender = await self.__muc_handle.set_self_nick(
-                room=self.__muc,
-                new_nick=sender,
-                timeout=10
-            )
-        except TimeoutError:
-            self.__logger.error("Failed to change nickname to: %s", sender)
+        if origin.reply:
+            reply_body = "> " + origin.reply.replace("\n", "\n> ")
+            mbody = f"{reply_body}\n{origin.content}"
 
-    async def send_message(self, message: Message) -> None:
-        self.__logger.info("Sending message with id: %s", message.id)
+        actor = await self.__actor_factory.get_actor(
+            origin.sender.id,
+            origin.sender.name,
+            str(self.__muc)
+        )
+        message = actor.make_message(
+            mto=self.__muc,
+            mtype="groupchat",
+            mbody=mbody
+        )
+        message.send()
 
-        params = {
-            "mto": self.__muc,
-            "mtype": "groupchat",
-            "mbody": message.content
-        }
-
-        if message.reply:
-            reply_body = "> " + message.reply.replace("\n", "\n> ")
-            params["mbody"] = f"{reply_body}\n{message.content}"
-
-        await self.__change_nick(message.sender)
-        msg = self.__client.make_message(**params)
-        msg.send()
         self.__message_storage.add(
-            chat_id=int(message.chat.address),
+            chat_id=int(origin.chat.address),
             muc=str(self.__muc),
-            stanza_id=msg['id'],
-            telegram_id=message.id,
-            body=message.content,
-            topic_id=message.chat.topic_id
+            stanza_id=message['id'],
+            telegram_id=origin.id,
+            body=origin.content,
+            topic_id=origin.chat.topic_id
         )
 
     async def send_attachment(self, attachment: Attachment) -> None:
@@ -147,7 +114,13 @@ class XmppRoomHandler(ChatHandler):
         if not url:
             url = await attachment.url_callback()
 
-        upload_file = self.__client.plugin['xep_0363'].upload_file
+        actor = await self.__actor_factory.get_actor(
+            attachment.sender.id,
+            attachment.sender.name,
+            str(self.__muc)
+        )
+
+        upload_file = actor.plugin['xep_0363'].upload_file
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -167,11 +140,9 @@ class XmppRoomHandler(ChatHandler):
                 self.__logger.error("Cannot upload file: %s", error)
                 return
 
-        await self.__change_nick(attachment.sender)
-
         if attachment.reply:
             reply_body = "> " + attachment.reply.replace("\n", "\n> ")
-            self.__client.send_message(
+            actor.send_message(
                 mto=self.__muc,
                 mbody=reply_body,
                 mtype="groupchat"
@@ -181,7 +152,7 @@ class XmppRoomHandler(ChatHandler):
             f'<body xmlns="http://www.w3.org/1999/xhtml">'
             f'<a href="{url}">{url}</a></body>'
         )
-        message = self.__client.make_message(
+        message = actor.make_message(
             mbody=url,
             mto=self.__muc,
             mtype='groupchat',
@@ -190,65 +161,51 @@ class XmppRoomHandler(ChatHandler):
         message['oob']['url'] = url
         message.send()
 
-    async def edit_message(self, message: Message) -> None:
+    async def edit_message(self, edited: Message) -> None:
         result = self.__message_storage.get_by_id(
-            chat_id=int(message.chat.address),
+            chat_id=int(edited.chat.address),
             muc=str(self.__muc),
-            topic_id=message.chat.topic_id,
-            message_id=message.id
+            topic_id=edited.chat.topic_id,
+            message_id=edited.id
         )
 
         if not result:
             self.__logger.info(
                 "Failed to found stanza for event: %s",
-                message.id
+                edited.id
             )
             return
 
-        params = {
-            "mto": self.__muc,
-            "mtype": "groupchat",
-            "mbody": message.content
-        }
+        mbody: str = edited.content
+        actor = await self.__actor_factory.get_actor(
+            edited.sender.id,
+            edited.sender.name,
+            str(self.__muc)
+        )
 
-        if message.reply:
-            reply_body = "> " + message.reply.replace("\n", "\n> ")
-            params["mbody"] = f"{reply_body}\n{message.content}"
+        if edited.reply:
+            reply_body = "> " + edited.reply.replace("\n", "\n> ")
+            mbody = f"{reply_body}\n{edited.content}"
 
-        await self.__change_nick(message.sender)
-        msg = self.__client.make_message(**params)
-        msg['replace']['id'] = result.stanza_id
-        msg.send()
+        message = actor.make_message(
+            mto=self.__muc,
+            mtype="groupchat",
+            mbody=mbody
+        )
+        message['replace']['id'] = result.stanza_id
+        message.send()
 
     async def send_event(self, event: Event) -> None:
-        await self.__change_nick(BRIDGE_DEFAULT_NAME)
-        self.__client.send_message(
+        self.__main_actor.send_message(
             mto=self.__muc,
             mbody=event.content,
             mtype="groupchat"
         )
 
     async def unbridge(self) -> None:
-        self.__client.send_message(
+        self.__main_actor.send_message(
             mto=self.__muc,
             mbody=self.__messages.unbridge_xmpp,
             mtype="groupchat"
         )
-        self.__muc_handle.leave_muc(
-            room=self.__muc,
-            nick=self.__last_sender
-        )
-
-    @lru_cache(maxsize=100)
-    def __validate_name(self, sender: str) -> str:
-        if RTL_CHAR_PATTERN.search(sender):
-            sender = unidecode(sender)
-        valid = []
-        for char in sender:
-            for check in BLACKLIST_USERNAME_CHARS:
-                if check(char):
-                    break
-            else:
-                valid.append(char)
-
-        return "".join(valid)
+        self.__actor_factory.leave(str(self.__muc))
