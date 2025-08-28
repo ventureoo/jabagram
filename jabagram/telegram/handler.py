@@ -260,7 +260,7 @@ class TelegramChatHandler(ChatHandler):
 
         params = {
             "chat_id": self.address,
-            "text": f"{edited.sender}: {edited.content}",
+            "text": f"{edited.sender.name}: {edited.content}",
             "message_id": result.telegram_id,
             "entities": self.__make_bold_sender_name(edited.sender.name)
         }
@@ -273,11 +273,11 @@ class TelegramChatHandler(ChatHandler):
                 muc=edited.chat.address,
                 body=edited.reply
             ):
-                params["text"] = f"{edited.sender}: {edited.content}"
+                params["text"] = f"{edited.sender.name}: {edited.content}"
             else:
                 params["text"] = (
                     f"{edited.reply}\n"
-                    f"{edited.sender}: {edited.content}"
+                    f"{edited.sender.name}: {edited.content}"
                 )
                 format = [
                     {
