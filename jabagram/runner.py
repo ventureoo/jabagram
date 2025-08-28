@@ -24,6 +24,7 @@ import gettext
 
 from jabagram.command import UserCommandHandler
 from jabagram.database.admin import AdminStorage
+from jabagram.database.avatars import AvatarCache
 from jabagram.database.chats import ChatStorage
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
@@ -84,10 +85,11 @@ def main():
         with open(args.config, "r", encoding="utf-8") as f:
             config.read_file(f)
 
+        avatar_cache = AvatarCache(path=args.data)
         chat_storage = ChatStorage(path=args.data)
+        message_storage = MessageStorage(path=args.data)
         sticker_cache = StickerCache(path=args.data)
         topic_name_cache = TopicNameCache(path=args.data)
-        message_storage = MessageStorage(path=args.data)
         admin_storage = AdminStorage(path=args.data)
 
         if not all([
@@ -95,7 +97,8 @@ def main():
             sticker_cache.create(),
             topic_name_cache.create(),
             message_storage.create(),
-            admin_storage.create()
+            admin_storage.create(),
+            avatar_cache.create()
         ]):
             logger.error("Error when working with the database, interrupt...")
             return
@@ -149,7 +152,8 @@ def main():
             dispatcher=dispatcher,
             command_handler=command_handler,
             message_storage=message_storage,
-            topic_name_cache=topic_name_cache
+            topic_name_cache=topic_name_cache,
+            avatar_cache=avatar_cache,
         )
         xmpp = XmppListener(
             settings=XmppConnectionSettings(

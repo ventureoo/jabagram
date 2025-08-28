@@ -16,19 +16,17 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-from abc import abstractmethod
 import asyncio
 import logging
-from pathlib import Path
 import re
 import stringprep
 
-from functools import lru_cache
-from collections import OrderedDict
+from abc import ABC, abstractmethod
 from aiohttp import ClientSession
-
-from abc import ABC
+from collections import OrderedDict
+from functools import lru_cache
 from jabagram.model import Sender
+from pathlib import Path
 from slixmpp import ClientXMPP, JID, BaseXMPP
 from slixmpp.componentxmpp import ComponentXMPP
 from slixmpp.exceptions import PresenceError
@@ -83,7 +81,7 @@ class XmppActor(ABC):
         self.__client.add_event_handler("connected", self.__on_connected)
 
     async def _session_start(self, _):
-        self.__client.send_presence()
+        self.__client.send_presence(pfrom=self.get_from_value())
         self.__start_event.set()
 
         if self._reconnecting:
@@ -357,38 +355,40 @@ class XmppActorFactory():
         if user.id in self.__actors_pool.keys():
             self.__actors_pool.move_to_end(user.id)
             actor = self.__actors_pool[user.id]
-        else:
-            self.__logger.info(
-                f"Trying to create actor with {self.__jid}/{user.id}"
+            return actor
+
+        self.__logger.info(
+            f"Trying to create actor with {self.__jid}/{user.id}"
+        )
+
+        if isinstance(self.__client, ClientXMPP):
+            actor = XmppUserActor(
+                jid=self.__client.jid,
+                password=self.__client.password,
+                user=user,
             )
 
-            if isinstance(self.__client, ClientXMPP):
-                actor = XmppUserActor(
-                    jid=self.__client.jid,
-                    password=self.__client.password,
-                    user=user,
-                )
-            elif isinstance(self.__client, ComponentXMPP):
-                actor = XmppComponentActor(
-                    client=self.__client,
-                    user=user,
-                    upload_domain=self.__upload_domain,
-                )
-            else:
-                return self.__listener
+            await actor.start()
 
-            self.__actors_pool[user.id] = actor
-            self.__actors_pool.move_to_end(user.id)
-
-            if len(self.__actors_pool) > self.__pool_size_limit:
-                (_, removed) = self.__actors_pool.popitem(last=False)
-                await removed.destroy()
-
-            if not self.__client.is_component:
-                await actor.start()
+        elif isinstance(self.__client, ComponentXMPP):
+            actor = XmppComponentActor(
+                client=self.__client,
+                user=user,
+                upload_domain=self.__upload_domain,
+            )
+        else:
+            return self.__listener
 
         if not (await actor.join(muc)):
+            await actor.destroy()
             return self.__listener
+
+        self.__actors_pool[user.id] = actor
+        self.__actors_pool.move_to_end(user.id)
+
+        if len(self.__actors_pool) > self.__pool_size_limit:
+            (_, removed) = self.__actors_pool.popitem(last=False)
+            await removed.destroy()
 
         return actor
 

@@ -16,12 +16,14 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import aiohttp
 import logging
 import mimetypes
 
 from gettext import gettext as _
-from typing import Any
+from typing import Any, override
 from jabagram.command import UserCommandHandler
+from jabagram.database.avatars import AvatarCache
 from jabagram.database.messages import MessageStorage
 from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
@@ -51,6 +53,7 @@ class TelegramClient(ChatHandlerFactory):
         dispatcher: MessageDispatcher,
         topic_name_cache: TopicNameCache,
         message_storage: MessageStorage,
+        avatar_cache: AvatarCache,
     ) -> None:
         self.__api = TelegramApi(token)
         self.__token = token
@@ -59,12 +62,15 @@ class TelegramClient(ChatHandlerFactory):
         self.__chat_service = chat_service
         self.__topic_name_cache = topic_name_cache
         self.__message_storage = message_storage
+        self.__avatar_cache = avatar_cache
         self.__command_handler = command_handler
         self.__logger = logging.getLogger(__class__.__name__)
 
+    @override
     def realm(self):
         return Realm.TELEGRAM
 
+    @override
     async def create_handler(
         self,
         address: str,
@@ -313,6 +319,54 @@ class TelegramClient(ChatHandlerFactory):
             sender += " [" + topic_name + "]"
             sender_id += f"_{topic_id}"
 
+        async def avatar_callback():
+            try:
+                data = self.__avatar_cache.get(sender_id)
+
+                if data:
+                    self.__logger.info(
+                        "User %s avatar retrieved from cache",
+                        sender_id
+                    )
+                    return data
+
+                profile = await self.__api.getUserProfilePhotos(
+                    user_id=int(sender_id),
+                    offset=0,
+                    limit=1
+                )
+
+                avatars = profile['photos']
+
+                if not avatars:
+                    return None
+
+                # Pick always the smallest first avatar only
+                avatar = avatars[0][0]
+                file = await self.__api.getFile(file_id=avatar['file_id'])
+                file_path = file['file_path']
+                url = (
+                    f"https://api.telegram.org/file/bot"
+                    f"{self.__token}/{file_path}"
+                )
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        data = await response.read()
+
+                self.__avatar_cache.add(sender_id, data)
+                return data
+            except TelegramApiError as error:
+                self.__logger.error(
+                    "Failed to get avatar of user: %s",
+                    error
+                )
+            except aiohttp.ClientResponseError as error:
+                self.__logger.error(
+                    "Failed to download user avatar: %s",
+                    error
+                )
+
         if text:
             if forward:
                 original_sender = "Unknown"
@@ -336,7 +390,11 @@ class TelegramClient(ChatHandlerFactory):
                         topic_id=topic_id
                     ),
                     text=text,
-                    sender=Sender(name=sender, id=sender_id),
+                    sender=Sender(
+                        name=sender,
+                        id=sender_id,
+                        avatar_callback=avatar_callback
+                    ),
                     reply=reply,
                     edit=edit,
                 )
@@ -373,7 +431,11 @@ class TelegramClient(ChatHandlerFactory):
                             address=chat_id,
                             topic_id=topic_id
                         ),
-                        sender=Sender(name=sender, id=sender_id),
+                        sender=Sender(
+                            name=sender,
+                            id=sender_id,
+                            avatar_callback=avatar_callback
+                        ),
                         file_id=attachment.file_unique_id,
                         mime=attachment.mime,
                         fsize=attachment.fsize,
@@ -391,7 +453,11 @@ class TelegramClient(ChatHandlerFactory):
                             address=chat_id,
                             topic_id=topic_id
                         ),
-                        sender=Sender(name=sender, id=sender_id),
+                        sender=Sender(
+                            name=sender,
+                            id=sender_id,
+                            avatar_callback=avatar_callback
+                        ),
                         # if we have text, reply should be nested
                         # in the message below
                         reply=None if text else reply,

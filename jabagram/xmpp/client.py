@@ -79,7 +79,11 @@ class XmppListener(XmppActor, ChatHandlerFactory):
         super().__init__(
             client=self.__client,
             upload_domain=upload_domain,
-            user=Sender(name=BRIDGE_DEAFAULT_NAME, id=BRIDGE_DEAFAULT_ID)
+            user=Sender(
+                name=BRIDGE_DEAFAULT_NAME,
+                id=BRIDGE_DEAFAULT_ID,
+                avatar_callback=None
+            )
         )
         self.__chat_service = chat_service
         self.__dispatcher = disptacher
@@ -220,7 +224,7 @@ class XmppListener(XmppActor, ChatHandlerFactory):
             attachment = Attachment(
                 id=message_id,
                 chat=Chat(realm=Realm.XMPP, address=str(muc)),
-                sender=Sender(name=sender, id=""),
+                sender=Sender(name=sender, id="", avatar_callback=None),
                 url_callback=url_callback,
                 fname=fname,
                 text=caption if caption else "",
@@ -240,7 +244,7 @@ class XmppListener(XmppActor, ChatHandlerFactory):
             message = Message(
                 id=message_id,
                 chat=Chat(realm=Realm.XMPP, address=muc),
-                sender=Sender(name=sender, id=""),
+                sender=Sender(name=sender, id="", avatar_callback=None),
                 text=text if reply and text else body,
                 reply=reply,
                 edit=is_edit

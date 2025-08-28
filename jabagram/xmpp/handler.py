@@ -65,7 +65,8 @@ class XmppRoomHandler(ChatHandler):
         actor = await self.__actor_factory.get_actor(
             user=Sender(
                 id=origin.sender.id,
-                name=origin.sender.name
+                name=origin.sender.name,
+                avatar_callback=origin.sender.avatar_callback,
             ),
             muc=str(self.__muc)
         )
@@ -118,7 +119,8 @@ class XmppRoomHandler(ChatHandler):
         actor = await self.__actor_factory.get_actor(
             user=Sender(
                 id=attachment.sender.id,
-                name=attachment.sender.name
+                name=attachment.sender.name,
+                avatar_callback=attachment.sender.avatar_callback
             ),
             muc=str(self.__muc)
         )
@@ -190,7 +192,8 @@ class XmppRoomHandler(ChatHandler):
         actor = await self.__actor_factory.get_actor(
             user=Sender(
                 id=edited.sender.id,
-                name=edited.sender.name
+                name=edited.sender.name,
+                avatar_callback=edited.sender.avatar_callback,
             ),
             muc=str(self.__muc)
         )

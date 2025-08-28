@@ -43,6 +43,7 @@ class UnbridgeEvent(Forwardable):
 class Sender():
     name: str
     id: str
+    avatar_callback: Callable | None
 
 @dataclass(kw_only=True)
 class Event(Forwardable):
