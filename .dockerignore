@@ -1,0 +1,7 @@
+*
+!.dockerignore
+!Dockerfile
+!jabagram/**/*.py
+!README.md
+!pyproject.toml
+!requirements.txt

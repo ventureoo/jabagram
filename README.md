@@ -120,13 +120,21 @@ pre-install dependencies on the host system, just build a container image:
 ```
 git clone https://github.com/ventureoo/
 cd jabagram
-docker build -t jabagram .
+docker buildx build --restart always -t jabagram .
+```
+
+You should also create a data directory to store your database and bridge
+configuration outside of the container environment:
+
+```
+mkdir -p ./data
+cp -v config.ini data
 ```
 
 The following command is used to start it:
 
 ```
-docker run --restart always -d --name jabagram -v "$(pwd)/data:/app/data:rw" jabagram
+docker run --restart always -d --name jabagram -v "$PWD/data:/data:rw" jabagram
 ```
 
 Note about the ``-v`` key. It specifies that the database file be stored

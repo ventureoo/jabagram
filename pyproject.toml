@@ -1,9 +1,6 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "jabagram"
+version = "1.0.1"
 description = "Fully functional bridge between Telegram and XMPP"
 authors = [ {name = "Vasiliy Stelmachenok", email = "ventureo@yandex.ru"} ]
 maintainers = [ {name = "Vasiliy Stelmachenok", email = "ventureo@yandex.ru"} ]
@@ -19,7 +16,10 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12"
 ]
-dynamic = ["version"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
 
 [project.scripts]
 jabagram = "jabagram.runner:main"
@@ -29,6 +29,10 @@ Homepage = "https://github.com/ventureoo/jabagram"
 Repository = "https://github.com/ventureoo/jabagram.git"
 "Bug Tracker" = "https://github.com/ventureoo/jabagram/issues"
 
-[tool.hatch.version]
-path = "jabagram/__init__.py"
+[tool.poetry.dependencies]
+slixmpp = { version = "^1.9.0", source = "codeberg-slixmpp" }
 
+[[tool.poetry.source]]
+name = "codeberg-slixmpp"
+url = "https://codeberg.org/api/packages/poezio/pypi/simple/"
+priority = "explicit"
