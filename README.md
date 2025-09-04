@@ -49,6 +49,13 @@ and install all the dependencies specified in the ``requirements.txt``(slixmpp
 git clone https://github.com/ventureoo/jabagram
 cd jabagram
 pip install -r requirements.txt
+pip install -e .
+```
+
+After manual installation you can start bridge with the following command:
+
+```
+python -m jabagram.runner
 ```
 
 ## Deploy
