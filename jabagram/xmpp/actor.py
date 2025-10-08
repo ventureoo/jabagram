@@ -115,11 +115,11 @@ class XmppActor(ClientXMPP):
             self.__logger.info(
                 "Trying to join %s room...", muc
             )
-            asyncio.create_task(self.plugin['xep_0045'].join_muc_wait(
+            _ = await self.plugin['xep_0045'].join_muc_wait(
                 JID(muc),
                 self.__name,
                 maxstanzas=0
-            ))
+            )
             self.__logger.info(
                 "Successfully joined to the room %s",
                 muc
