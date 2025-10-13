@@ -111,25 +111,30 @@ class XmppActor(ClientXMPP):
         if muc in self.__rooms:
             return True
 
-        try:
-            self.__logger.info(
-                "Trying to join %s room...", muc
-            )
-            _ = await self.plugin['xep_0045'].join_muc_wait(
-                JID(muc),
-                self.__name,
-                maxstanzas=0
-            )
-            self.__logger.info(
-                "Successfully joined to the room %s",
-                muc
-            )
-            self.__rooms.append(muc)
-            return True
-        except PresenceError as error:
-            self.__logger.error("Failed to join muc: %s", error.text)
-        except TimeoutError:
-            self.__logger.error("Failed to join muc: max time exceeded")
+        count = 5
+        while count > 0:
+            try:
+                self.__logger.info(
+                    "Trying to join %s room...", muc
+                )
+                _ = await self.plugin['xep_0045'].join_muc_wait(
+                    JID(muc),
+                    self.__name,
+                    maxstanzas=0,
+                    timeout=5
+                )
+                self.__logger.info(
+                    "Successfully joined to the room %s",
+                    muc
+                )
+                self.__rooms.append(muc)
+                return True
+            except PresenceError as error:
+                count = count - 1
+                self.__logger.error("Failed to join muc: %s", error.text)
+            except TimeoutError:
+                count = count - 1
+                self.__logger.error("Failed to join muc: max time exceeded")
 
         return False
 
