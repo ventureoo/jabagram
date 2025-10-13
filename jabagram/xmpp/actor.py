@@ -121,7 +121,7 @@ class XmppActor(ClientXMPP):
                     JID(muc),
                     self.__name,
                     maxstanzas=0,
-                    timeout=5
+                    timeout=60
                 )
                 self.__logger.info(
                     "Successfully joined to the room %s",
