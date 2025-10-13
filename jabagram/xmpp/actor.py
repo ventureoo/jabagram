@@ -111,32 +111,41 @@ class XmppActor(ClientXMPP):
         if muc in self.__rooms:
             return True
 
-        count = 5
-        while count > 0:
-            try:
-                self.__logger.info(
-                    "Trying to join %s room...", muc
-                )
-                _ = await self.plugin['xep_0045'].join_muc_wait(
-                    JID(muc),
-                    self.__name,
-                    maxstanzas=0,
-                    timeout=60
-                )
-                self.__logger.info(
-                    "Successfully joined to the room %s",
-                    muc
-                )
-                self.__rooms.append(muc)
-                return True
-            except PresenceError as error:
-                count = count - 1
-                self.__logger.error("Failed to join muc: %s", error.text)
-            except TimeoutError:
-                count = count - 1
-                self.__logger.error("Failed to join muc: max time exceeded")
+        self.__logger.info(
+            "Trying to join %s room...", muc
+        )
 
-        return False
+        async def _try_to_join():
+            count = 5
+
+            while count > 0:
+                try:
+                    await self.plugin['xep_0045'].join_muc_wait(
+                        room=JID(muc),
+                        nick=self.__name,
+                        maxstanzas=0,
+                    )
+                    return True
+                except TimeoutError:
+                    count = count - 1
+                    self.__logger.error("Failed to join muc: max time exceeded")
+                except PresenceError as error:
+                    count = count - 1
+                    self.__logger.error("Failed to join muc: %s", error.text)
+
+            return False
+
+        task = asyncio.create_task(_try_to_join())
+
+        await asyncio.wait((task,), timeout=5)
+
+        # Of course we can not, but that’s because slixmpp is completely broken
+        self.__logger.info(
+            "Successfully joined to the room %s",
+            muc
+        )
+        self.__rooms.append(muc)
+        return True
 
     def leave(self, muc: str):
         if muc in self.__rooms:
