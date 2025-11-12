@@ -1,6 +1,6 @@
 [project]
 name = "jabagram"
-version = "1.0.1"
+version = "1.1.0"
 description = "Fully functional bridge between Telegram and XMPP"
 authors = [ {name = "Vasiliy Stelmachenok", email = "ventureo@yandex.ru"} ]
 maintainers = [ {name = "Vasiliy Stelmachenok", email = "ventureo@yandex.ru"} ]
