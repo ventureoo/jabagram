@@ -24,6 +24,7 @@ from jabagram.database.base import SqliteTable
 class MessageIdEntry(NamedTuple):
     telegram_id: int
     stanza_id: str
+    topic_id: int | None
 
 class MessageStorage(SqliteTable):
     def __init__(self, path):
@@ -112,7 +113,7 @@ class MessageStorage(SqliteTable):
         body: str
     ) -> MessageIdEntry | None:
         statement = (
-            "SELECT telegram_id, stanza_id FROM messages WHERE"
+            "SELECT telegram_id, stanza_id, topic_id FROM messages WHERE"
             " chat_id = ? AND muc = ? AND body = ?"
         )
         digest = hashlib.sha256(body.encode()).hexdigest()

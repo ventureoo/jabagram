@@ -70,7 +70,6 @@ class TelegramChatHandler(ChatHandler):
         self.__api = api
         self.__messages = messages
         self.__residence_map: dict[str, TopicTimeoutEntry] = {}
-        self.__topic_ids_cache: dict[int, int] = {}
 
     def __make_bold_sender_name(self, text: str):
         message_entities = [
@@ -82,11 +81,8 @@ class TelegramChatHandler(ChatHandler):
         ]
         return dumps(message_entities)
 
-    def __is_time_left(self, time: datetime, value: int) -> float:
-        return (datetime.now() - time).total_seconds() < value
-
-    def add_topic_id(self, message_id: int, topic_id: int):
-        self.__topic_ids_cache[message_id] = topic_id
+    def __is_time_left(self, last: datetime, timeout: int) -> bool:
+        return (datetime.now() - last).total_seconds() < timeout
 
     async def send_message(self, origin: Message) -> None:
         params: dict[str, Any] = {
@@ -94,6 +90,7 @@ class TelegramChatHandler(ChatHandler):
             "chat_id": self.address,
             "entities": self.__make_bold_sender_name(origin.sender.name)
         }
+        entry: TopicTimeoutEntry | None = self.__residence_map.get(origin.sender.name)
 
         if origin.reply:
             result: MessageIdEntry | None = self.__message_storage.get_by_body(
@@ -106,20 +103,12 @@ class TelegramChatHandler(ChatHandler):
                 params["text"] = f"{origin.sender.name}: {origin.content}"
                 params["reply_to_message_id"] = result.telegram_id
 
-                entry: TopicTimeoutEntry | None = self.__residence_map.get(
-                    origin.sender.name
-                )
-
-                topic_id = self.__topic_ids_cache.get(result.telegram_id)
-                if topic_id:
-                    params["message_thread_id"] = topic_id
-                    if entry:
-                        entry.time = datetime.now()
-                        entry.topic_id = topic_id
+                if result.topic_id:
+                    params["message_thread_id"] = result.topic_id
+                    entry = TopicTimeoutEntry(result.topic_id, datetime.now())
                 else:
-                    if entry and self.__is_time_left(entry.time, TELEGRAM_TOPIC_TIMEOUT):
-                        params["message_thread_id"] = entry.topic_id
-                        entry.time = datetime.now()
+                    del self.__residence_map[origin.sender.name]
+                    entry = None
             else:
                 params["text"] = (
                     f"{origin.reply}\n"
@@ -139,10 +128,10 @@ class TelegramChatHandler(ChatHandler):
                 ]
                 params["entities"] = dumps(format)
         else:
-            entry: TopicTimeoutEntry | None = self.__residence_map.get(
-                origin.sender.name
-            )
-            if entry and self.__is_time_left(entry.time, TELEGRAM_TOPIC_TIMEOUT):
+            if entry and self.__is_time_left(
+                last=entry.time,
+                timeout=TELEGRAM_TOPIC_TIMEOUT
+            ):
                 params["message_thread_id"] = entry.topic_id
                 entry.time = datetime.now()
 
@@ -156,6 +145,9 @@ class TelegramChatHandler(ChatHandler):
                 body=origin.content,
                 topic_id=response.get("message_thread_id")
             )
+
+            if entry:
+                self.__residence_map[origin.sender.name] = entry
         except TelegramApiError as error:
             self.__logger.error("Error sending a message: %s", error)
 
@@ -191,7 +183,8 @@ class TelegramChatHandler(ChatHandler):
                         attachment.sender.name
                     )
                     if entry and self.__is_time_left(
-                        entry.time, TELEGRAM_TOPIC_TIMEOUT
+                        last=entry.time,
+                        timeout=TELEGRAM_TOPIC_TIMEOUT
                     ):
                         params["message_thread_id"] = entry.topic_id
                         entry.time = datetime.now()
@@ -221,6 +214,8 @@ class TelegramChatHandler(ChatHandler):
                             body=attachment.content,
                             topic_id=response.get("message_thread_id")
                         )
+                        if entry:
+                            self.__residence_map[attachment.sender.name] = entry
                     except TelegramApiError as error:
                         try:
                             await self.__api.sendMessage(
