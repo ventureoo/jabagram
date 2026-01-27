@@ -18,9 +18,9 @@
 import aiohttp
 import logging
 
+from gettext import gettext as _
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
-from jabagram.messages import Messages
 from jabagram.model import (
     Attachment,
     ChatHandler,
@@ -43,7 +43,6 @@ class XmppRoomHandler(ChatHandler):
         actor_factory: XmppActorFactory,
         message_storage: MessageStorage,
         sticker_cache: StickerCache,
-        messages: Messages
     ) -> None:
         super().__init__(address)
         self.__main_actor = main_actor
@@ -51,7 +50,6 @@ class XmppRoomHandler(ChatHandler):
         self.__muc = JID(address)
         self.__message_storage = message_storage
         self.__sticker_cache = sticker_cache
-        self.__messages = messages
         self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
 
     async def send_message(self, origin: Message) -> None:
@@ -205,7 +203,10 @@ class XmppRoomHandler(ChatHandler):
     async def unbridge(self) -> None:
         self.__main_actor.send_message(
             mto=self.__muc,
-            mbody=self.__messages.unbridge_xmpp,
+            mbody=_(
+                "This chat was automatically unbridged "
+                "due to a bot kick in Telegram."
+            ),
             mtype="groupchat"
         )
         self.__actor_factory.leave(str(self.__muc))

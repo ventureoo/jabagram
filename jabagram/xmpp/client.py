@@ -22,7 +22,6 @@ from datetime import datetime
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
 from jabagram.dispatcher import MessageDispatcher
-from jabagram.messages import Messages
 from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
@@ -46,7 +45,6 @@ class XmppClient(XmppActor, ChatHandlerFactory):
         disptacher: MessageDispatcher,
         sticker_cache: StickerCache,
         message_storage: MessageStorage,
-        messages: Messages,
         actors_pool_size_limit: int
     ) -> None:
         super().__init__(
@@ -60,7 +58,6 @@ class XmppClient(XmppActor, ChatHandlerFactory):
         self.__dispatcher = disptacher
         self.__sticker_cache = sticker_cache
         self.__message_storage = message_storage
-        self.__messages = messages
         self.__actor_factory = XmppActorFactory(
             jid=jid,
             password=password,
@@ -82,7 +79,6 @@ class XmppClient(XmppActor, ChatHandlerFactory):
             address=muc,
             sticker_cache=self.__sticker_cache,
             message_storage=self.__message_storage,
-            messages=self.__messages,
             actor_factory=self.__actor_factory
         )
 

@@ -19,10 +19,10 @@
 import logging
 import mimetypes
 
+from gettext import gettext as _
 from jabagram.database.messages import MessageStorage
 from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
-from jabagram.messages import Messages
 from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
@@ -47,7 +47,6 @@ class TelegramClient(ChatHandlerFactory):
         dispatcher: MessageDispatcher,
         topic_name_cache: TopicNameCache,
         message_storage: MessageStorage,
-        messages: Messages
     ) -> None:
         self.__api: TelegramApi = TelegramApi(token)
         self.__token: str = token
@@ -55,7 +54,6 @@ class TelegramClient(ChatHandlerFactory):
         self.__logger = logging.getLogger(__class__.__name__)
         self.__disptacher: MessageDispatcher = dispatcher
         self.__service: ChatService = service
-        self.__messages = messages
         self.__handlers: dict[int, TelegramChatHandler] = {}
         self.__topic_name_cache = topic_name_cache
         self.__message_storage = message_storage
@@ -70,7 +68,6 @@ class TelegramClient(ChatHandlerFactory):
             address=address,
             api=self.__api,
             message_storage=self.__message_storage,
-            messages=self.__messages
         )
         self.__handlers[int(address)] = handler
         self.__disptacher.add_handler(muc, handler)
@@ -144,17 +141,31 @@ class TelegramClient(ChatHandlerFactory):
 
                 await self.__api.sendMessage(
                     chat_id=chat_id,
-                    text=self.__messages.queueing_message.format(self.__jid)
+                    text=_(
+                        "Specified room has been successfully placed on the queue."
+                        " Please invite this {} bot to your XMPP room,"
+                        " and as the reason for the invitation specify the secret key"
+                        " that is specified in bot's config or ask the owner"
+                        " of this bridge instance for it.\n\n"
+                        "If you have specified an incorrect room address, simply repeat"
+                        " the pair command (/jabagram) with the corrected address."
+                    ).format(self.__jid)
                 )
             except IndexError:
                 await self.__api.sendMessage(
                     chat_id=chat_id,
-                    text=self.__messages.missing_muc_jid
+                    text=_(
+                        "Please specify the MUC address of room "
+                        "you want to pair with this Telegram chat."
+                    )
                 )
             except InvalidJID:
                 await self.__api.sendMessage(
                     "sendMessage", chat_id=chat_id,
-                    text=self.__messages.invalid_jid
+                    text=_(
+                        "You have specified an incorrect room JID. "
+                        "Please try again."
+                    )
                 )
         except TelegramApiError as error:
             self.__logger.error(

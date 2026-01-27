@@ -5,3 +5,5 @@
 !README.md
 !pyproject.toml
 !requirements.txt
+!locales/*.po
+!locales/*.pot

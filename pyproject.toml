@@ -32,6 +32,11 @@ Repository = "https://github.com/ventureoo/jabagram.git"
 [tool.poetry.dependencies]
 slixmpp = { version = "^1.9.0", source = "codeberg-slixmpp" }
 
+[tool.poetry]
+include = [
+    { path = "locales", format = ["sdist", "wheel"] }
+]
+
 [[tool.poetry.source]]
 name = "codeberg-slixmpp"
 url = "https://codeberg.org/api/packages/poezio/pypi/simple/"

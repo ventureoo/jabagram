@@ -23,10 +23,10 @@ from typing import Any
 
 from aiohttp import ClientConnectionError
 from datetime import datetime
+from gettext import gettext as _
 from jabagram.database.messages import MessageIdEntry, MessageStorage
-from jabagram.telegram.api import TelegramApi, TelegramApiError
 from jabagram.model import ChatHandler, Event, Message, Attachment
-from jabagram.messages import Messages
+from jabagram.telegram.api import TelegramApi, TelegramApiError
 
 # When an XMPP user replies to a message coming from a side topic, all of his
 # further simple messages (not replies) are forwarded to that Telegram chat
@@ -61,14 +61,12 @@ class TelegramChatHandler(ChatHandler):
         address: str,
         api: TelegramApi,
         message_storage: MessageStorage,
-        messages: Messages
     ) -> None:
         super().__init__(address)
         self.__address = address
         self.__message_storage = message_storage
         self.__logger = logging.getLogger(f"TelegramChatHandler ({address})")
         self.__api = api
-        self.__messages = messages
         self.__residence_map: dict[str, TopicTimeoutEntry] = {}
 
     def __make_bold_sender_name(self, text: str):
@@ -315,7 +313,9 @@ class TelegramChatHandler(ChatHandler):
         try:
             await self.__api.sendMessage(
                 chat_id=self.address,
-                text=self.__messages.unbridge_telegram
+                text=(_("This chat was automatically unbridged due to a bot kick in XMPP.\n"
+                        "If you want to bridge it again, invite this bot to this"
+                        " chat again and use the /jabagram command."))
             )
             await self.__api.leaveChat(chat_id=self.address)
         except TelegramApiError as error:

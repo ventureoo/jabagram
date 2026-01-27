@@ -20,13 +20,13 @@ import argparse
 import asyncio
 import configparser
 import logging
+import gettext
 
 from jabagram.database.chats import ChatStorage
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
 from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
-from jabagram.messages import Messages
 from jabagram.service import ChatService
 from jabagram.telegram.client import TelegramClient
 from jabagram.xmpp.client import XmppClient
@@ -52,10 +52,17 @@ def main():
         dest="data", help="path to bridge database"
     )
     parser.add_argument(
+        '-l', '--locales', default="../locales",
+        dest="locales", help="path to translations"
+    )
+    parser.add_argument(
         '-v', '--verbose', dest="verbose",
         action='store_true', help="output debug information",
     )
     args = parser.parse_args()
+
+    gettext.bindtextdomain("jabagram", args.locales)
+    gettext.textdomain("jabagram")
 
     if args.verbose:
         logging.basicConfig(
@@ -74,12 +81,10 @@ def main():
 
     try:
         config = configparser.ConfigParser(interpolation=None)
-        messages = Messages(config)
 
         with open(args.config, "r", encoding="utf-8") as f:
             config.read_file(f)
 
-        messages.load()
         chat_storage = ChatStorage(path=args.data)
         sticker_cache = StickerCache(path=args.data)
         topic_name_cache = TopicNameCache(path=args.data)
@@ -120,8 +125,7 @@ def main():
             service=service,
             dispatcher=dispatcher,
             message_storage=message_storage,
-            topic_name_cache=topic_name_cache,
-            messages=messages
+            topic_name_cache=topic_name_cache
         )
         xmpp = XmppClient(
             jid=config.get("xmpp", "login"),
@@ -130,8 +134,7 @@ def main():
             disptacher=dispatcher,
             sticker_cache=sticker_cache,
             message_storage=message_storage,
-            actors_pool_size_limit=actors_pool_size_limit,
-            messages=messages
+            actors_pool_size_limit=actors_pool_size_limit
         )
         loop.create_task(telegram.start())
         loop.create_task(xmpp.start())
