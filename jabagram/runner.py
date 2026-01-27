@@ -99,7 +99,8 @@ def main():
             logger.error("Error when working with the database, interrupt...")
             return
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
         service = ChatService(
             storage=chat_storage,
