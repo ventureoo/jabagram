@@ -7,14 +7,15 @@ maintainers = [ {name = "Vasiliy Stelmachenok", email = "ventureo@yandex.ru"} ]
 keywords = ["xmpp", "telegram", "asyncio", "bridge"]
 license = "GPL-3.0-only"
 readme = "README.md"
-requires-python = ">= 3.10"
+requires-python = ">= 3.11"
 dependencies = ["aiohttp", "slixmpp", "unidecode"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12"
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14"
 ]
 
 [build-system]
@@ -30,7 +31,7 @@ Repository = "https://github.com/ventureoo/jabagram.git"
 "Bug Tracker" = "https://github.com/ventureoo/jabagram/issues"
 
 [tool.poetry.dependencies]
-slixmpp = { version = "^1.9.0", source = "codeberg-slixmpp" }
+slixmpp = { version = "^1.13", source = "codeberg-slixmpp" }
 
 [tool.poetry]
 include = [

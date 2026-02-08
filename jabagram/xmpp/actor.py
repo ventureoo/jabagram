@@ -115,34 +115,25 @@ class XmppActor(ClientXMPP):
             "Trying to join %s room...", muc
         )
 
-        async def _try_to_join():
-            count = 5
-
-            while count > 0:
-                try:
-                    await self.plugin['xep_0045'].join_muc_wait(
-                        room=JID(muc),
-                        nick=self.__name,
-                        maxstanzas=0,
-                    )
-                    return True
-                except TimeoutError:
-                    count = count - 1
-                    self.__logger.error("Failed to join muc: max time exceeded")
-                except PresenceError as error:
-                    count = count - 1
-                    self.__logger.error("Failed to join muc: %s", error.text)
-
+        for _ in range(5):
+            try:
+                await self.plugin['xep_0045'].join_muc_wait(
+                    room=JID(muc),
+                    nick=self.__name,
+                    maxstanzas=0,
+                    timeout=5
+                )
+                break
+            except TimeoutError:
+                self.__logger.error("Failed to join muc: max time exceeded")
+            except PresenceError as error:
+                self.__logger.error("Failed to join muc: %s", error.text)
+        else:
+            self.__logger.error("Max number of join attempts exceeded")
             return False
 
-        task = asyncio.create_task(_try_to_join())
-
-        await asyncio.wait((task,), timeout=5)
-
-        # Of course we can not, but that’s because slixmpp is completely broken
         self.__logger.info(
-            "Successfully joined to the room %s",
-            muc
+            "Successfully joined to the room %s", muc
         )
         self.__rooms.append(muc)
         return True
