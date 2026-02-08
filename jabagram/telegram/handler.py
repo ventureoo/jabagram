@@ -105,8 +105,9 @@ class TelegramChatHandler(ChatHandler):
                     params["message_thread_id"] = result.topic_id
                     entry = TopicTimeoutEntry(result.topic_id, datetime.now())
                 else:
-                    del self.__residence_map[origin.sender.name]
-                    entry = None
+                    if entry:
+                        del self.__residence_map[origin.sender.name]
+                        entry = None
             else:
                 params["text"] = (
                     f"{origin.reply}\n"
