@@ -213,7 +213,7 @@ class TelegramChatHandler(ChatHandler):
                             muc=attachment.chat.address,
                             stanza_id=attachment.id,
                             telegram_id=response['message_id'],
-                            body=caption,
+                            body=f"{attachment.text}\n{url}" if attachment.text else url,
                             topic_id=response.get("message_thread_id")
                         )
                         if entry:

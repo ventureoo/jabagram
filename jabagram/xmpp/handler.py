@@ -154,6 +154,15 @@ class XmppRoomHandler(ChatHandler):
         message['oob']['url'] = url
         message.send()
 
+        self.__message_storage.add(
+            chat_id=int(attachment.chat.address),
+            muc=str(self.__muc),
+            stanza_id=message['id'],
+            telegram_id=attachment.id,
+            body=body,
+            topic_id=attachment.chat.topic_id
+        )
+
     async def edit_message(self, edited: Message) -> None:
         result = self.__message_storage.get_by_id(
             chat_id=int(edited.chat.address),
