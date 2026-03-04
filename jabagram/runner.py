@@ -141,6 +141,8 @@ def main():
         loop.create_task(xmpp.start())
         loop.create_task(dispatcher.start())
         loop.run_forever()
+    except KeyboardInterrupt:
+        logger.info("SIGTERM received, exit...")
     except FileNotFoundError:
         logger.error(CONFIG_FILE_NOT_FOUND)
     except configparser.NoOptionError:
