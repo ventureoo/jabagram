@@ -65,8 +65,10 @@ def main():
     gettext.textdomain("jabagram")
 
     if args.verbose:
+        is_container = path.exists("/.dockerenv") or \
+                    path.exists("/run/.containerenv")
         logging.basicConfig(
-            filename=None if path.exists("/.dockerenv") else "jabagram.log",
+            filename=None if is_container else "jabagram.log",
             filemode='a',
             format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
             level=logging.DEBUG
