@@ -169,7 +169,7 @@ class XmppRoomHandler(ChatHandler):
             )
             return
 
-        mbody: str = edited.text
+        mbody = edited.text
         actor = await self.__actor_factory.get_actor(
             edited.sender.id,
             edited.sender.name,

@@ -48,12 +48,12 @@ class TelegramClient(ChatHandlerFactory):
         topic_name_cache: TopicNameCache,
         message_storage: MessageStorage,
     ) -> None:
-        self.__api: TelegramApi = TelegramApi(token)
-        self.__token: str = token
-        self.__jid: str = jid
+        self.__api = TelegramApi(token)
+        self.__token = token
+        self.__jid = jid
         self.__logger = logging.getLogger(__class__.__name__)
-        self.__disptacher: MessageDispatcher = dispatcher
-        self.__service: ChatService = service
+        self.__disptacher = dispatcher
+        self.__service = service
         self.__handlers: dict[int, TelegramChatHandler] = {}
         self.__topic_name_cache = topic_name_cache
         self.__message_storage = message_storage
@@ -268,10 +268,10 @@ class TelegramClient(ChatHandlerFactory):
         message_id = str(raw_message['message_id'])
         sender, sender_id = self.__get_user(raw_message['from'])
         text: str | None = raw_message.get("text")
-        reply: str | None = self.__get_reply(raw_message)
+        reply = self.__get_reply(raw_message)
         forward: dict | None = raw_message.get('forward_origin')
         topic_id = raw_message.get("message_thread_id")
-        topic_name: str | None = self.__extract_topic_name(raw_message)
+        topic_name = self.__extract_topic_name(raw_message)
 
         if topic_name:
             sender += " [" + topic_name + "]"
@@ -302,9 +302,7 @@ class TelegramClient(ChatHandlerFactory):
                 )
             )
         else:
-            attachment: TelegramAttachment | None = self.__extract_attachment(
-                sender, raw_message
-            )
+            attachment = self.__extract_attachment(sender, raw_message)
 
             if not attachment:
                 return

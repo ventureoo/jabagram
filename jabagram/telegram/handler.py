@@ -88,10 +88,10 @@ class TelegramChatHandler(ChatHandler):
             "chat_id": self.address,
             "entities": self.__make_bold_sender_name(origin.sender.name)
         }
-        entry: TopicTimeoutEntry | None = self.__residence_map.get(origin.sender.name)
+        entry = self.__residence_map.get(origin.sender.name)
 
         if origin.reply:
-            result: MessageIdEntry | None = self.__message_storage.get_by_body(
+            result = self.__message_storage.get_by_body(
                 chat_id=int(self.__address),
                 topic_id=None,
                 muc=origin.chat.address,
@@ -183,9 +183,7 @@ class TelegramChatHandler(ChatHandler):
                         ),
                     }
 
-                    entry: TopicTimeoutEntry | None = self.__residence_map.get(
-                        attachment.sender.name
-                    )
+                    entry = self.__residence_map.get(attachment.sender.name)
                     if entry and self.__is_time_left(
                         last=entry.time,
                         timeout=TELEGRAM_TOPIC_TIMEOUT
