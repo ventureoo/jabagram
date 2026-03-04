@@ -18,7 +18,6 @@
 import sqlite3
 import logging
 from abc import abstractmethod
-from typing import Optional
 
 class SqliteTable():
     def __init__(self, path):
@@ -29,7 +28,7 @@ class SqliteTable():
         self,
         *args,
         statement: str,
-        on_error_message: Optional[str] = None
+        on_error_message: str | None = None
     ) -> list | None:
         try:
             with sqlite3.connect(self.__path) as connection:

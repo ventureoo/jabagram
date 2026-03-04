@@ -18,7 +18,7 @@
 import logging
 import hashlib
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 from jabagram.database.base import SqliteTable
 
 class MessageIdEntry(NamedTuple):
@@ -70,7 +70,7 @@ class MessageStorage(SqliteTable):
     def get_by_id(
         self,
         chat_id: int,
-        topic_id: Optional[int],
+        topic_id: int | None,
         muc: str,
         message_id: str
     ) -> MessageIdEntry | None:
@@ -108,7 +108,7 @@ class MessageStorage(SqliteTable):
     def get_by_body(
         self,
         chat_id: int,
-        topic_id: Optional[int],
+        topic_id: int | None,
         muc: str,
         body: str
     ) -> MessageIdEntry | None:

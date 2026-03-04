@@ -18,12 +18,12 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable
 
 @dataclass(kw_only=True)
 class Chat():
     address: str
-    topic_id: Optional[int] = None
+    topic_id: int | None = None
 
 @dataclass(kw_only=True)
 class Forwardable():

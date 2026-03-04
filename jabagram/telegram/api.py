@@ -24,7 +24,6 @@ from aiohttp import (
     ClientConnectionError
 )
 from types import TracebackType
-from typing import Optional, Type
 
 
 class TelegramApiError(Exception):
@@ -45,9 +44,9 @@ class TelegramApi():
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_value: Optional[BaseException],
-        _: Optional[TracebackType]
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        _: TracebackType | None
     ) -> None:
         if exc_value and exc_type:
             self.__logger.error(

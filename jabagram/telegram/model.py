@@ -16,7 +16,6 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 from dataclasses import dataclass
-from typing import Optional
 
 @dataclass(kw_only=True)
 class TelegramAttachment():
@@ -24,5 +23,5 @@ class TelegramAttachment():
     file_id: str
     file_unique_id: str
     fname: str
-    mime: Optional[str] = None
-    fsize: Optional[int] = None
+    mime: str | None = None
+    fsize: int | None = None
