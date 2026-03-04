@@ -31,7 +31,7 @@ from jabagram.model import (
 from jabagram.xmpp.actor import XmppActorFactory, XmppActor
 
 from pathlib import Path
-from slixmpp.exceptions import IqTimeout
+from slixmpp.exceptions import IqTimeout, IqError
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
 
@@ -55,11 +55,11 @@ class XmppRoomHandler(ChatHandler):
     async def send_message(self, origin: Message) -> None:
         self.__logger.info("Sending message with id: %s", origin.id)
 
-        mbody = origin.content
+        mbody = origin.text
 
         if origin.reply:
             reply_body = "> " + origin.reply.replace("\n", "\n> ")
-            mbody = f"{reply_body}\n{origin.content}"
+            mbody = f"{reply_body}\n{origin.text}"
 
         actor = await self.__actor_factory.get_actor(
             origin.sender.id,
@@ -78,7 +78,7 @@ class XmppRoomHandler(ChatHandler):
             muc=str(self.__muc),
             stanza_id=message['id'],
             telegram_id=origin.id,
-            body=origin.content,
+            body=origin.text,
             topic_id=origin.chat.topic_id
         )
 
@@ -106,7 +106,7 @@ class XmppRoomHandler(ChatHandler):
 
         else:
             self.__logger.info(
-                "Sending attachment with name: %s", attachment.content
+                "Sending attachment with name: %s", attachment.fname
             )
 
         if not url:
@@ -124,7 +124,7 @@ class XmppRoomHandler(ChatHandler):
             try:
                 async with session.get(url) as resp:
                     url = await upload_file(
-                        filename=Path(attachment.content),
+                        filename=Path(attachment.fname or f"File from {attachment.sender.name}"),
                         size=attachment.fsize or resp.content_length,
                         content_type=attachment.mime or resp.content_type,
                         input_file=resp.content # type: ignore
@@ -134,27 +134,22 @@ class XmppRoomHandler(ChatHandler):
                             attachment.file_id, url
                         )
 
-            except (HTTPError, aiohttp.ClientConnectionError, IqTimeout) as error:
+            except (HTTPError, aiohttp.ClientConnectionError, IqTimeout, IqError) as error:
                 self.__logger.error("Cannot upload file: %s", error)
                 return
 
-        if attachment.reply:
-            reply_body = "> " + attachment.reply.replace("\n", "\n> ")
-            actor.send_message(
-                mto=self.__muc,
-                mbody=reply_body,
-                mtype="groupchat"
-            )
+        body = url
+        if attachment.text:
+            body = f"{attachment.text}\n{body}"
 
-        html = (
-            f'<body xmlns="http://www.w3.org/1999/xhtml">'
-            f'<a href="{url}">{url}</a></body>'
-        )
+        if attachment.reply:
+            reply = "> " + attachment.reply.replace("\n", "\n> ")
+            body = f"{reply}\n{body}"
+
         message = actor.make_message(
-            mbody=url,
+            mbody=body,
             mto=self.__muc,
             mtype='groupchat',
-            mhtml=html
         )
         message['oob']['url'] = url
         message.send()
@@ -174,7 +169,7 @@ class XmppRoomHandler(ChatHandler):
             )
             return
 
-        mbody: str = edited.content
+        mbody: str = edited.text
         actor = await self.__actor_factory.get_actor(
             edited.sender.id,
             edited.sender.name,
@@ -183,7 +178,7 @@ class XmppRoomHandler(ChatHandler):
 
         if edited.reply:
             reply_body = "> " + edited.reply.replace("\n", "\n> ")
-            mbody = f"{reply_body}\n{edited.content}"
+            mbody = f"{reply_body}\n{mbody}"
 
         message = actor.make_message(
             mto=self.__muc,
@@ -196,7 +191,7 @@ class XmppRoomHandler(ChatHandler):
     async def send_event(self, event: Event) -> None:
         self.__main_actor.send_message(
             mto=self.__muc,
-            mbody=event.content,
+            mbody=event.text,
             mtype="groupchat"
         )
 

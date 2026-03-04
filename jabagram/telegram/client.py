@@ -267,64 +267,15 @@ class TelegramClient(ChatHandlerFactory):
         chat_id = str(raw_message['chat']['id'])
         message_id = str(raw_message['message_id'])
         sender, sender_id = self.__get_user(raw_message['from'])
-        text: str | None = raw_message.get(
-            "text") or raw_message.get("caption")
+        text: str | None = raw_message.get("text")
         reply: str | None = self.__get_reply(raw_message)
         forward: dict | None = raw_message.get('forward_origin')
-        attachment: TelegramAttachment | None = self.__extract_attachment(
-            sender, raw_message
-        )
         topic_id = raw_message.get("message_thread_id")
         topic_name: str | None = self.__extract_topic_name(raw_message)
 
         if topic_name:
             sender += " [" + topic_name + "]"
             sender_id += f"_{topic_id}"
-
-        if attachment:
-            async def url_callback():
-                try:
-                    file = await self.__api.getFile(file_id=attachment.file_id)
-                    file_path = file['file_path']
-                    url = (
-                        f"https://api.telegram.org/file/bot"
-                        f"{self.__token}/{file_path}"
-                    )
-                    return url
-                except TelegramApiError as error:
-                    self.__logger.error(
-                        "Failed to get url of attachment: %s", error
-                    )
-
-            # Right now we can cache only stickers
-            if attachment.is_cacheable:
-                await self.__disptacher.send(
-                    Sticker(
-                        id=message_id,
-                        content=attachment.fname,
-                        chat=Chat(address=chat_id, topic_id=topic_id),
-                        sender=Sender(name=sender, id=sender_id),
-                        file_id=attachment.file_unique_id,
-                        mime=attachment.mime,
-                        fsize=attachment.fsize,
-                        url_callback=url_callback,
-                    )
-                )
-            else:
-                await self.__disptacher.send(
-                    Attachment(
-                        id=message_id,
-                        chat=Chat(address=chat_id, topic_id=topic_id),
-                        sender=Sender(name=sender, id=sender_id),
-                        content=attachment.fname,
-                        # if we have text, reply should be nested
-                        # in the message below
-                        reply=None if text else reply,
-                        mime=attachment.mime,
-                        fsize=attachment.fsize,
-                        url_callback=url_callback,
-                    )
-                )
 
         if text:
             if forward:
@@ -344,12 +295,66 @@ class TelegramClient(ChatHandlerFactory):
                 Message(
                     id=message_id,
                     chat=Chat(address=chat_id, topic_id=topic_id),
-                    content=text,
+                    text=text,
                     sender=Sender(name=sender, id=sender_id),
                     reply=reply,
                     edit=edit,
                 )
             )
+        else:
+            attachment: TelegramAttachment | None = self.__extract_attachment(
+                sender, raw_message
+            )
+
+            if not attachment:
+                return
+
+            async def url_callback():
+                try:
+                    file = await self.__api.getFile(file_id=attachment.file_id)
+                    file_path = file['file_path']
+                    url = (
+                        f"https://api.telegram.org/file/bot"
+                        f"{self.__token}/{file_path}"
+                    )
+                    return url
+                except TelegramApiError as error:
+                    self.__logger.error(
+                        "Failed to get url of attachment: %s", error
+                    )
+
+            # Right now we can cache only stickers
+            if attachment.is_cacheable:
+                await self.__disptacher.send(
+                    Sticker(
+                        id=message_id,
+                        fname=attachment.fname,
+                        text=raw_message.get("caption") or "",
+                        chat=Chat(address=chat_id, topic_id=topic_id),
+                        sender=Sender(name=sender, id=sender_id),
+                        file_id=attachment.file_unique_id,
+                        mime=attachment.mime,
+                        fsize=attachment.fsize,
+                        url_callback=url_callback,
+                    )
+                )
+            else:
+                await self.__disptacher.send(
+                    Attachment(
+                        id=message_id,
+                        fname=attachment.fname,
+                        text=raw_message.get("caption") or "",
+                        chat=Chat(address=chat_id, topic_id=topic_id),
+                        sender=Sender(name=sender, id=sender_id),
+                        # if we have text, reply should be nested
+                        # in the message below
+                        reply=None if text else reply,
+                        mime=attachment.mime,
+                        fsize=attachment.fsize,
+                        url_callback=url_callback,
+                    )
+                )
+
 
     async def __process_kick_event(self, chat_member: dict) -> None:
         new_state = chat_member.get("new_chat_member")

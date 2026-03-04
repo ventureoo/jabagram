@@ -41,7 +41,7 @@ class Sender():
 @dataclass(kw_only=True)
 class Event(Forwardable):
     id: str
-    content: str = field(repr=False)
+    text: str = field(repr=False)
 
 @dataclass(kw_only=True)
 class Message(Event):
@@ -52,6 +52,7 @@ class Message(Event):
 @dataclass(kw_only=True)
 class Attachment(Message):
     url_callback: Callable = field(repr=False)
+    fname: str | None = None
     mime: str | None = None
     fsize: int | None = None
 

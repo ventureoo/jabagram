@@ -101,7 +101,7 @@ class XmppClient(XmppActor, ChatHandlerFactory):
         sender: str = message['mucnick']
         message_id: str = message['id']
         muc: str = message['mucroom']
-        text: str = message['body'].strip()
+        body: str = message['body'].strip()
 
         if not self.__dispatcher.is_bound(muc):
             return
@@ -115,35 +115,39 @@ class XmppClient(XmppActor, ChatHandlerFactory):
             async def url_callback():
                 return url
 
+            caption = None
+            url_start = body.rfind(url)
+
+            if url_start > 0:
+                caption = body[:url_start].strip()
+                self.__logger.info("caption", caption)
+
             fname: str = url.split("/")[-1]
             attachment = Attachment(
                 id=message_id,
                 chat=Chat(address=str(muc)),
                 sender=Sender(name=sender, id=""),
                 url_callback=url_callback,
-                content=fname,
+                fname=fname,
+                text=caption if caption else "",
                 mime=None,
                 fsize=None,
             )
             await self.__dispatcher.send(attachment)
         else:
-            content = text
             is_edit = False
 
             if message['replace']['id']:
                 message_id: str = message['replace']['id']
                 is_edit = True
 
-            reply, body = self.__parse_reply(text)
-
-            if reply and body:
-                content = body
+            reply, text = self.__parse_reply(body)
 
             message = Message(
                 id=message_id,
                 chat=Chat(address=muc),
                 sender=Sender(name=sender, id=""),
-                content=content,
+                text=text if reply and text else body,
                 reply=reply,
                 edit=is_edit
             )

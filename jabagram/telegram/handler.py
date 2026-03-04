@@ -84,7 +84,7 @@ class TelegramChatHandler(ChatHandler):
 
     async def send_message(self, origin: Message) -> None:
         params: dict[str, Any] = {
-            "text": f"{origin.sender.name}: {origin.content}",
+            "text": f"{origin.sender.name}: {origin.text}",
             "chat_id": self.address,
             "entities": self.__make_bold_sender_name(origin.sender.name)
         }
@@ -98,7 +98,7 @@ class TelegramChatHandler(ChatHandler):
                 body=origin.reply,
             )
             if result:
-                params["text"] = f"{origin.sender.name}: {origin.content}"
+                params["text"] = f"{origin.sender.name}: {origin.text}"
                 params["reply_to_message_id"] = result.telegram_id
 
                 if result.topic_id:
@@ -111,7 +111,7 @@ class TelegramChatHandler(ChatHandler):
             else:
                 params["text"] = (
                     f"{origin.reply}\n"
-                    f"{origin.sender.name}: {origin.content}"
+                    f"{origin.sender.name}: {origin.text}"
                 )
                 format = [
                     {
@@ -141,7 +141,7 @@ class TelegramChatHandler(ChatHandler):
                 muc=origin.chat.address,
                 stanza_id=origin.id,
                 telegram_id=response['message_id'],
-                body=origin.content,
+                body=origin.text,
                 topic_id=response.get("message_thread_id")
             )
 
@@ -165,14 +165,19 @@ class TelegramChatHandler(ChatHandler):
                     mime = resp.content_type
                     form_data = aiohttp.FormData()
                     form_data.add_field(
-                        'file', resp.content, filename=attachment.content,
+                        'file', resp.content, filename=attachment.fname,
                         content_type=mime
                     )
 
                     method = self.__api.sendDocument
+                    caption = f"{attachment.sender.name}:"
+
+                    if attachment.text:
+                        caption = f"{caption} {attachment.text}"
+
                     params: dict[str, Any] = {
                         "chat_id": self.address,
-                        "caption": f"{attachment.sender.name}: ",
+                        "caption": caption,
                         "caption_entities": self.__make_bold_sender_name(
                             attachment.sender.name
                         ),
@@ -210,7 +215,7 @@ class TelegramChatHandler(ChatHandler):
                             muc=attachment.chat.address,
                             stanza_id=attachment.id,
                             telegram_id=response['message_id'],
-                            body=attachment.content,
+                            body=caption,
                             topic_id=response.get("message_thread_id")
                         )
                         if entry:
@@ -221,7 +226,7 @@ class TelegramChatHandler(ChatHandler):
                                 chat_id=self.address,
                                 text=(
                                     "Couldn't transfer file"
-                                    f"{attachment.content} "
+                                    f"{attachment.fname} "
                                     f"from {attachment.sender.name}"
                                 )
                             )
@@ -254,7 +259,7 @@ class TelegramChatHandler(ChatHandler):
 
         params = {
             "chat_id": self.address,
-            "text": f"{edited.sender.name}: {edited.content}",
+            "text": f"{edited.sender.name}: {edited.text}",
             "message_id": result.telegram_id,
             "entities": self.__make_bold_sender_name(edited.sender.name)
         }
@@ -267,11 +272,11 @@ class TelegramChatHandler(ChatHandler):
                 muc=edited.chat.address,
                 body=edited.reply
             ):
-                params["text"] = f"{edited.sender.name}: {edited.content}"
+                params["text"] = f"{edited.sender.name}: {edited.text}"
             else:
                 params["text"] = (
                     f"{edited.reply}\n"
-                    f"{edited.sender.name}: {edited.content}"
+                    f"{edited.sender.name}: {edited.text}"
                 )
                 format = [
                     {
@@ -293,7 +298,7 @@ class TelegramChatHandler(ChatHandler):
                 muc=edited.chat.address,
                 stanza_id=edited.id,
                 telegram_id=response['message_id'],
-                body=edited.content,
+                body=edited.text,
                 topic_id=response.get("message_thread_id")
             )
         except TelegramApiError as error:
@@ -303,7 +308,7 @@ class TelegramChatHandler(ChatHandler):
         try:
             await self.__api.sendMessage(
                 chat_id=self.address,
-                text=event.content
+                text=event.text
             )
         except TelegramApiError as error:
             self.__logger.error(
