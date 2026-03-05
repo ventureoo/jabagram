@@ -64,21 +64,16 @@ def main():
     gettext.bindtextdomain("jabagram", args.locales)
     gettext.textdomain("jabagram")
 
-    if args.verbose:
-        is_container = path.exists("/.dockerenv") or \
-                    path.exists("/run/.containerenv")
-        logging.basicConfig(
-            filename=None if is_container else "jabagram.log",
-            filemode='a',
-            format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
-            level=logging.DEBUG
-        )
-    else:
-        logging.basicConfig(
-            format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
-            level=logging.INFO
-        )
+    is_container = any([
+        path.exists(env) for env in ("/.dockerenv", "/run/.containerenv")
+    ])
 
+    logging.basicConfig(
+        filename=None if is_container else "jabagram.log",
+        filemode='a',
+        format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
+        level=logging.DEBUG if args.verbose else logging.INFO
+    )
     logger = logging.Logger("Runner")
 
     try:
