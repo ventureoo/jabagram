@@ -105,9 +105,9 @@ You can also use Docker to deploy the bridge. Here you don't need to
 pre-install dependencies on the host system, just build a container image:
 
 ```
-git clone https://github.com/ventureoo/
+git clone https://github.com/ventureoo/jabagram
 cd jabagram
-docker buildx build --restart always -t jabagram .
+docker buildx build -t jabagram .
 ```
 
 You should also create a data directory to store your database and bridge
