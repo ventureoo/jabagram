@@ -82,7 +82,7 @@ class XmppActor(ClientXMPP):
         if self._reconnecting:
             self.__logger.info("Trying to rejoining to rooms...")
             for room in self.__rooms:
-                await self.join(room)
+                await self.join(room, rejoin=True)
 
     async def __on_connected(self, _):
         self.__logger.info("Successfully connected.")
@@ -107,8 +107,8 @@ class XmppActor(ClientXMPP):
         if message['error']['text'] == XMPP_OCCUPANT_ERROR and room in self.__rooms:
             _ = await self.join(room)
 
-    async def join(self, muc: str) -> bool:
-        if muc in self.__rooms:
+    async def join(self, muc: str, rejoin: bool = False) -> bool:
+        if muc in self.__rooms and not rejoin:
             return True
 
         self.__logger.info(
@@ -135,7 +135,8 @@ class XmppActor(ClientXMPP):
         self.__logger.info(
             "Successfully joined to the room %s", muc
         )
-        self.__rooms.append(muc)
+        if muc not in self.__rooms:
+            self.__rooms.append(muc)
         return True
 
     def leave(self, muc: str):
@@ -144,6 +145,7 @@ class XmppActor(ClientXMPP):
                 room=JID(muc),
                 nick=self.__name
             )
+            self.__rooms.remove(muc)
 
     async def start(self):
         self.connect()
