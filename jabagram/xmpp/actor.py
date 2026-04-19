@@ -108,7 +108,7 @@ class XmppActor(ClientXMPP):
             _ = await self.join(room)
 
     async def join(self, muc: str) -> bool:
-        if muc in self.__rooms:
+        if muc in self.__rooms and not self._reconnecting:
             return True
 
         self.__logger.info(
@@ -135,7 +135,8 @@ class XmppActor(ClientXMPP):
         self.__logger.info(
             "Successfully joined to the room %s", muc
         )
-        self.__rooms.append(muc)
+        if muc not in self.__rooms:
+            self.__rooms.append(muc)
         return True
 
     def leave(self, muc: str):
@@ -144,6 +145,7 @@ class XmppActor(ClientXMPP):
                 room=JID(muc),
                 nick=self.__name
             )
+            self.__rooms.remove(muc)
 
     async def start(self):
         self.connect()
