@@ -17,10 +17,11 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 import sqlite3
 import logging
+from typing import Any
 from abc import abstractmethod
 
 class SqliteTable():
-    def __init__(self, path):
+    def __init__(self, path: str):
         self.__path = path
         self.__logger = logging.getLogger(__class__.__name__)
 
@@ -29,7 +30,7 @@ class SqliteTable():
         *args,
         statement: str,
         on_error_message: str | None = None
-    ) -> list | None:
+    ) -> list[tuple[Any, ...]] | None:
         try:
             with sqlite3.connect(self.__path) as connection:
                 cursor = connection.cursor()

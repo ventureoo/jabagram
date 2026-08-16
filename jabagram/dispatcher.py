@@ -24,6 +24,7 @@ from jabagram.database.chats import ChatStorage
 from jabagram.model import (
     Attachment,
     ChatHandler,
+    Chat,
     Event,
     Forwardable,
     Message,
@@ -36,7 +37,7 @@ class MessageDispatcher():
 
     def __init__(self, storage: ChatStorage):
         self.__loop = asyncio.get_event_loop()
-        self.__chat_map: dict[str, ChatHandler] = {}
+        self.__chat_map: dict[str, list[ChatHandler]] = {}
         self.__event_queue: Queue[Forwardable] = Queue(maxsize=100)
         self.__storage = storage
         self.__logger = logging.getLogger(self.__class__.__name__)
@@ -46,53 +47,75 @@ class MessageDispatcher():
         Start event loop for infinite processing of queued events
         """
         while True:
-            forwardable: Forwardable = await self.__event_queue.get()
-            handler: ChatHandler | None = self.__chat_map.get(
-                forwardable.chat.address
-            )
+            forwardable = await self.__event_queue.get()
+            handlers = self.get_handlers(forwardable.chat.address)
             self.__logger.info("Received event: %s", forwardable)
-            if not handler:
+
+            if not handlers:
                 self.__logger.error(
                     "Unhandled event for chat: %s", forwardable.chat.address
                 )
                 continue
 
-            match forwardable:
-                case Attachment():
-                    self.__loop.create_task(
-                        handler.send_attachment(forwardable)
-                    )
-                case Message():
-                    if forwardable.edit:
+            for handler in handlers:
+                match forwardable:
+                    case Attachment():
                         self.__loop.create_task(
-                            handler.edit_message(forwardable)
+                            handler.send_attachment(forwardable)
                         )
-                    else:
+                    case Message():
+                        if forwardable.edit:
+                            self.__loop.create_task(
+                                handler.edit_message(forwardable)
+                            )
+                        else:
+                            self.__loop.create_task(
+                                handler.send_message(forwardable)
+                            )
+                    case Event():
                         self.__loop.create_task(
-                            handler.send_message(forwardable)
+                            handler.send_event(forwardable)
                         )
-                case Event():
-                    self.__loop.create_task(
-                        handler.send_event(forwardable)
-                    )
-                case UnbridgeEvent():
-                    await handler.unbridge()
-                    del self.__chat_map[forwardable.chat.address]
-                    del self.__chat_map[handler.address]
-                    self.__storage.remove(handler.address)
+                    case UnbridgeEvent():
+                        await handler.unbridge()
+                        self.__unpair(forwardable.chat, handler.chat)
+
+            if isinstance(forwardable, UnbridgeEvent):
+                del self.__chat_map[forwardable.chat.address]
+                self.__storage.remove(forwardable.chat)
 
     async def send(self, forwardable: Forwardable):
         """Put event inside event queue"""
         await self.__event_queue.put(forwardable)
 
     def add_handler(self, address: str, handler: ChatHandler):
-        """Add chat handler that recieves events"""
-        self.__chat_map[address] = handler
+        """Add chat handlers that recieves events from address"""
+        handlers = self.get_handlers(address)
 
-    def is_bound(self, chat: str):
+        if not handlers:
+            handlers = []
+            self.__chat_map[address] = handlers
+
+        handlers.append(handler)
+
+    def get_handlers(
+        self,
+        address: str
+    ) -> list[ChatHandler] | None:
+        """Get handlers for the chat"""
+        return self.__chat_map.get(address)
+
+    def is_paired(self, chat: str) -> bool:
         """Check if the chat is inside the chat handlers map"""
         return chat in self.__chat_map
 
-    def remove_handler(self, address: str):
+    def __unpair(self, source: Chat, target: Chat):
         """Remove chat handler from chat handlers map"""
-        del self.__chat_map[address]
+        handlers = self.get_handlers(target.address) or []
+        for i in range(len(handlers)):
+            if handlers[i].chat.address == source.address:
+                handlers.pop(i)
+                break
+
+        if not handlers:
+            del self.__chat_map[target.address]

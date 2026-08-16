@@ -18,62 +18,112 @@
 
 import logging
 
-from jabagram.model import ChatHandlerFactory
+from jabagram.dispatcher import MessageDispatcher
+from jabagram.model import ChatHandlerFactory, Realm, Chat, UnbridgeEvent
 from jabagram.database.chats import ChatStorage
 
 class ChatService():
     def __init__(
         self,
+        dispatcher: MessageDispatcher,
         storage: ChatStorage,
-        key: str
     ) -> None:
         self.__storage = storage
-        self.__pending_chats: dict[str, str] = {}
-        self.__factories: list[ChatHandlerFactory] = []
-        self.__key = key
+        self.__dispatcher = dispatcher
+        self.__pending_chats: dict[Chat, Chat] = {}
+        self.__factories: dict[Realm, ChatHandlerFactory] = {}
         self.__logger = logging.getLogger(__class__.__name__)
 
-    async def bind(self, muc: str, key: str) -> None:
-        telegram_id: str | None = self.__pending_chats.get(muc)
+    async def pair(self, source: Chat) -> bool:
+        target: Chat | None = self.__pending_chats.get(source)
 
-        if telegram_id is None:
-            return
+        if target is None:
+            return False
 
-        if key != self.__key:
-            self.__logger.info("Wrong key was recieved: %s", key)
-            return
+        if not (await self.__spawn_handlers(source, target)):
+            return False
 
-        self.__logger.info('New chat pair binded: %s - %s', muc, telegram_id)
-        self.__storage.add(telegram_id, muc)
-        del self.__pending_chats[muc]
-        await self.__spawn_handlers(telegram_id, muc)
+        self.__storage.add(source, target)
 
-    async def __spawn_handlers(self, telegram_id, muc):
-        self.__logger.info(
-            "Create handlers for chat %s and MUC: %s", telegram_id, muc
-        )
-        # Notify all factories to create chat message handlers
-        for factory in self.__factories:
-            await factory.create_handler(telegram_id, muc)
+        return True
 
-    def register_factory(self, factory: ChatHandlerFactory) -> None:
-        self.__factories.append(factory)
+    async def unpair(self, source: Chat) -> None:
+        await self.__dispatcher.send(UnbridgeEvent(chat=source))
+
+    async def __spawn_handlers(self, source: Chat, target: Chat) -> bool:
+        handlers = self.__dispatcher.get_handlers(source.address)
+
+        target_factory = self.__factories[target.realm]
+        target_handler = (await target_factory.create_handler(target.address))
+
+        if not target_handler:
+            return False
+
+        if handlers:
+            for handler in handlers:
+                self.__dispatcher.add_handler(handler.chat.address, target_handler)
+                self.__dispatcher.add_handler(target.address, handler)
+
+        else:
+            source_factory = self.__factories[source.realm]
+            source_handler = (await source_factory.create_handler(source.address))
+
+            if source_handler and target_handler:
+                self.__dispatcher.add_handler(source.address, target_handler)
+                self.__dispatcher.add_handler(target.address, source_handler)
+
+        del self.__pending_chats[source]
+        del self.__pending_chats[target]
+
+        return True
+
+    def register_factory(self, realm: Realm, factory: ChatHandlerFactory) -> None:
+        self.__logger.info(f"New chat factory for {realm.name} registred")
+        self.__factories[realm] = factory
 
     async def load_chats(self) -> None:
         self.__logger.info("Loading chats from database...")
-        chats = self.__storage.get() or []
+        pairs = self.__storage.get() or []
 
-        for chat in chats:
-            telegram_id, muc = chat
-            await self.__spawn_handlers(str(telegram_id), muc)
+        for pair in pairs:
+            source, target = pair
 
-    def pending(self, muc: str, chat: str) -> None:
+            if self.pending(source, target):
+                await self.__spawn_handlers(source, target)
+
+    def is_paired(
+            self,
+            source: Chat,
+            target: Chat | None = None
+    ) -> bool:
+        if not target:
+            return self.__dispatcher.is_paired(source.address)
+
+        handlers = self.__dispatcher.get_handlers(target.address)
+
+        if handlers:
+            for handler in handlers:
+                if handler.chat.address == source.address:
+                    return True
+
+        return False
+
+    def pending(self, source: Chat, target: Chat) -> bool:
+        old_target = self.__pending_chats.get(source)
+        old_source = self.__pending_chats.get(target)
+
+        if old_source:
+            return False
+
+        if old_target:
+            del self.__pending_chats[old_target]
+
         self.__logger.info(
-            "The chats are staged for confirmation: %s - %s", muc, chat
+            "The chats are staged for confirmation: %s - %s",
+            source,
+            target
         )
-        for room, chat_id in self.__pending_chats.items():
-            if chat_id == chat:
-                del self.__pending_chats[room]
-                break
 
-        self.__pending_chats[muc] = chat
+        self.__pending_chats[source] = target
+        self.__pending_chats[target] = source
+        return True

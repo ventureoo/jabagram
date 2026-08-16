@@ -22,6 +22,8 @@ import configparser
 import logging
 import gettext
 
+from jabagram.command import UserCommandHandler
+from jabagram.database.admin import AdminStorage
 from jabagram.database.chats import ChatStorage
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
@@ -69,7 +71,7 @@ def main():
     ])
 
     logging.basicConfig(
-        filename=None if is_container else "jabagram.log",
+        filename=None,
         filemode='a',
         format="[%(asctime)s] %(name)s - %(levelname)s: %(message)s",
         level=logging.DEBUG if args.verbose else logging.INFO
@@ -86,12 +88,14 @@ def main():
         sticker_cache = StickerCache(path=args.data)
         topic_name_cache = TopicNameCache(path=args.data)
         message_storage = MessageStorage(path=args.data)
+        admin_storage = AdminStorage(path=args.data)
 
         if not all([
             chat_storage.create(),
             sticker_cache.create(),
             topic_name_cache.create(),
-            message_storage.create()
+            message_storage.create(),
+            admin_storage.create()
         ]):
             logger.error("Error when working with the database, interrupt...")
             return
@@ -99,12 +103,13 @@ def main():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        service = ChatService(
-            storage=chat_storage,
-            key=config.get("general", "key")
-        )
         dispatcher = MessageDispatcher(
             storage=chat_storage
+        )
+
+        chat_service = ChatService(
+            dispatcher=dispatcher,
+            storage=chat_storage,
         )
 
         actors_pool_size_limit = 16
@@ -117,20 +122,28 @@ def main():
         except configparser.NoOptionError:
             pass
 
+        command_handler = UserCommandHandler(
+            secret_key=config.get("general", "key"),
+            chat_service=chat_service,
+            admin_storage=admin_storage
+        )
+
         telegram = TelegramClient(
             token=config.get("telegram", "token"),
             jid=config.get("xmpp", "login"),
-            service=service,
+            chat_service=chat_service,
             dispatcher=dispatcher,
+            command_handler=command_handler,
             message_storage=message_storage,
             topic_name_cache=topic_name_cache
         )
         xmpp = XmppClient(
             jid=config.get("xmpp", "login"),
             password=config.get("xmpp", "password"),
-            service=service,
+            chat_service=chat_service,
             disptacher=dispatcher,
             sticker_cache=sticker_cache,
+            command_handler=command_handler,
             message_storage=message_storage,
             actors_pool_size_limit=actors_pool_size_limit
         )

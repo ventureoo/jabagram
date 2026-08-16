@@ -19,7 +19,7 @@ import logging
 from jabagram.database.base import SqliteTable
 
 class TopicNameCache(SqliteTable):
-    def __init__(self, path):
+    def __init__(self, path: str):
         self.__logger = logging.getLogger(__class__.__name__)
         super().__init__(path=path)
 

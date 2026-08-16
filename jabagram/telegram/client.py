@@ -20,13 +20,17 @@ import logging
 import mimetypes
 
 from gettext import gettext as _
+from typing import Any
+from jabagram.command import UserCommandHandler
 from jabagram.database.messages import MessageStorage
 from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
+    Realm,
     Chat,
+    ChatHandler,
     ChatHandlerFactory,
     Sender,
     Message,
@@ -36,14 +40,14 @@ from jabagram.model import (
 from jabagram.telegram.api import TelegramApi, TelegramApiError
 from jabagram.telegram.handler import TelegramChatHandler
 from jabagram.telegram.model import TelegramAttachment
-from slixmpp.jid import InvalidJID, JID
 
 class TelegramClient(ChatHandlerFactory):
     def __init__(
         self,
         token: str,
         jid: str,
-        service: ChatService,
+        chat_service: ChatService,
+        command_handler: UserCommandHandler,
         dispatcher: MessageDispatcher,
         topic_name_cache: TopicNameCache,
         message_storage: MessageStorage,
@@ -51,31 +55,34 @@ class TelegramClient(ChatHandlerFactory):
         self.__api = TelegramApi(token)
         self.__token = token
         self.__jid = jid
-        self.__logger = logging.getLogger(__class__.__name__)
         self.__disptacher = dispatcher
-        self.__service = service
-        self.__handlers: dict[int, TelegramChatHandler] = {}
+        self.__chat_service = chat_service
         self.__topic_name_cache = topic_name_cache
         self.__message_storage = message_storage
-        self.__service.register_factory(self)
+        self.__command_handler = command_handler
+        self.__logger = logging.getLogger(__class__.__name__)
+
+    def realm(self):
+        return Realm.TELEGRAM
 
     async def create_handler(
         self,
         address: str,
-        muc: str,
-    ) -> None:
+    ) -> ChatHandler | None:
         handler = TelegramChatHandler(
-            address=address,
+            chat=Chat(address=address, realm=Realm.TELEGRAM),
             api=self.__api,
             message_storage=self.__message_storage,
         )
-        self.__handlers[int(address)] = handler
-        self.__disptacher.add_handler(muc, handler)
+        return handler
 
     async def start(self):
         params = {
             "allowed_updates": ['message', 'edited_message', 'my_chat_member']
         }
+        self.__logger.info("Starting to getting updates from Telegram...")
+        self.__chat_service.register_factory(realm=Realm.TELEGRAM, factory=self)
+
         while True:
             updates = None
             try:
@@ -90,24 +97,47 @@ class TelegramClient(ChatHandlerFactory):
                 match update:
                     case {
                         "message": {
+                            "text": command,
+                            "chat": {
+                                "type": "group" | "supergroup",
+                                "id": chat_id
+                            },
+                            "from": {
+                                "id": user_id
+                            }
+                        }
+                    } if command.startswith("/jabagram"):
+                        await self.__bridge_chat_command(
+                            command=command,
+                            chat_id=str(chat_id),
+                            user_id=str(user_id),
+                        )
+                    case {
+                        "message": {
                             "chat": {
                                 "type": "group" | "supergroup",
                                 "id": chat
                             },
                         } as message
-                    } if self.__disptacher.is_bound(str(chat)):
+                    } if self.__disptacher.is_paired(str(chat)):
                         await self.__process_message(message)
                     case {
                         "message": {
-                            "text": text,
                             "chat": {
-                                "type": "group" | "supergroup",
-                                "id": chat
+                                "type": "private",
+                                "id": chat_id
                             },
-                        }
-                    } if not self.__disptacher.is_bound(str(chat)) \
-                            and text.startswith("/jabagram"):
-                        await self.__bridge_command(str(chat), text)
+                            "text": command,
+                            "from": {
+                                "id": user_id
+                            }
+                        } as message
+                    } if command.startswith("/jabagram"):
+                        await self.__bridge_direct_command(
+                            command=command,
+                            chat_id=str(chat_id),
+                            user_id=str(user_id),
+                        )
                     case {
                         "edited_message": {
                             "chat": {
@@ -115,7 +145,7 @@ class TelegramClient(ChatHandlerFactory):
                                 "id": chat
                             },
                         } as message
-                    } if self.__disptacher.is_bound(str(chat)):
+                    } if self.__disptacher.is_paired(str(chat)):
                         await self.__process_message(message, edit=True)
                     case {
                         "my_chat_member": {
@@ -124,49 +154,48 @@ class TelegramClient(ChatHandlerFactory):
                                 "id": chat
                             }
                         } as member
-                    } if self.__disptacher.is_bound(str(chat)):
+                    } if self.__disptacher.is_paired(str(chat)):
                         await self.__process_kick_event(member)
 
             params["offset"] = updates[len(updates) - 1]['update_id'] + 1
 
-    async def __bridge_command(self, chat_id: str, cmd: str) -> None:
+    async def __bridge_direct_command(
+        self,
+        command: str,
+        chat_id: str,
+        user_id: str,
+    ):
         try:
-            try:
-                muc_address = cmd.split(" ")[1]
+            response = self.__command_handler.handle_direct_user_command(
+                realm=Realm.TELEGRAM,
+                command=command,
+                user=user_id,
+            )
+            await self.__api.sendMessage(
+                chat_id=chat_id,
+                text=response
+            )
+        except TelegramApiError as error:
+            self.__logger.error(
+                "Error processing the bridge command: %s", error
+            )
 
-                # Check that MUC jid is valid
-                JID(muc_address)
-
-                self.__service.pending(muc_address, chat_id)
-
-                await self.__api.sendMessage(
-                    chat_id=chat_id,
-                    text=_(
-                        "Specified room has been successfully placed on the queue."
-                        " Please invite this {} bot to your XMPP room,"
-                        " and as the reason for the invitation specify the secret key"
-                        " that is specified in bot's config or ask the owner"
-                        " of this bridge instance for it.\n\n"
-                        "If you have specified an incorrect room address, simply repeat"
-                        " the pair command (/jabagram) with the corrected address."
-                    ).format(self.__jid)
-                )
-            except IndexError:
-                await self.__api.sendMessage(
-                    chat_id=chat_id,
-                    text=_(
-                        "Please specify the MUC address of room "
-                        "you want to pair with this Telegram chat."
-                    )
-                )
-            except InvalidJID:
-                await self.__api.sendMessage(
-                    "sendMessage", chat_id=chat_id,
-                    text=_(
-                        "You have specified an incorrect room JID. "
-                        "Please try again."
-                    )
-                )
+    async def __bridge_chat_command(
+        self,
+        command: str,
+        chat_id: str,
+        user_id: str,
+    ) -> None:
+        try:
+            response = (await self.__command_handler.handle_chat_user_command(
+                source_chat=Chat(address=chat_id, realm=Realm.TELEGRAM),
+                command=command,
+                user=user_id,
+            ))
+            await self.__api.sendMessage(
+                chat_id=chat_id,
+                text=response
+            )
         except TelegramApiError as error:
             self.__logger.error(
                 "Error processing the bridge command: %s", error
@@ -175,7 +204,7 @@ class TelegramClient(ChatHandlerFactory):
     def __extract_attachment(
             self,
             sender: str,
-            message: dict
+            message: dict[Any, Any]
     ) -> TelegramAttachment | None:
         match message:
             # We do not send animated stickers because they are in TGS format,
@@ -249,8 +278,11 @@ class TelegramClient(ChatHandlerFactory):
 
         return None
 
-    def __get_reply(self, message: dict) -> str | None:
-        reply: dict | None = message.get("reply_to_message")
+    def __get_reply(
+        self,
+        message: dict[Any, Any]
+    ) -> str | None:
+        reply: dict[Any, Any] | None = message.get("reply_to_message")
         if not reply:
             return None
 
@@ -263,13 +295,17 @@ class TelegramClient(ChatHandlerFactory):
 
         return reply_body
 
-    async def __process_message(self, raw_message: dict, edit=False) -> None:
+    async def __process_message(
+        self,
+        raw_message: dict[Any, Any],
+        edit=False
+    ) -> None:
         chat_id = str(raw_message['chat']['id'])
         message_id = str(raw_message['message_id'])
         sender, sender_id = self.__get_user(raw_message['from'])
         text: str | None = raw_message.get("text")
         reply = self.__get_reply(raw_message)
-        forward: dict | None = raw_message.get('forward_origin')
+        forward: dict[Any, Any] | None = raw_message.get('forward_origin')
         topic_id = raw_message.get("message_thread_id")
         topic_name = self.__extract_topic_name(raw_message)
 
@@ -294,7 +330,11 @@ class TelegramClient(ChatHandlerFactory):
             await self.__disptacher.send(
                 Message(
                     id=message_id,
-                    chat=Chat(address=chat_id, topic_id=topic_id),
+                    chat=Chat(
+                        realm=Realm.TELEGRAM,
+                        address=chat_id,
+                        topic_id=topic_id
+                    ),
                     text=text,
                     sender=Sender(name=sender, id=sender_id),
                     reply=reply,
@@ -328,7 +368,11 @@ class TelegramClient(ChatHandlerFactory):
                         id=message_id,
                         fname=attachment.fname,
                         text=raw_message.get("caption") or "",
-                        chat=Chat(address=chat_id, topic_id=topic_id),
+                        chat=Chat(
+                            realm=Realm.TELEGRAM,
+                            address=chat_id,
+                            topic_id=topic_id
+                        ),
                         sender=Sender(name=sender, id=sender_id),
                         file_id=attachment.file_unique_id,
                         mime=attachment.mime,
@@ -342,7 +386,11 @@ class TelegramClient(ChatHandlerFactory):
                         id=message_id,
                         fname=attachment.fname,
                         text=raw_message.get("caption") or "",
-                        chat=Chat(address=chat_id, topic_id=topic_id),
+                        chat=Chat(
+                            realm=Realm.TELEGRAM,
+                            address=chat_id,
+                            topic_id=topic_id
+                        ),
                         sender=Sender(name=sender, id=sender_id),
                         # if we have text, reply should be nested
                         # in the message below
@@ -354,18 +402,25 @@ class TelegramClient(ChatHandlerFactory):
                 )
 
 
-    async def __process_kick_event(self, chat_member: dict) -> None:
+    async def __process_kick_event(
+        self,
+        chat_member: dict[Any, Any]
+    ) -> None:
         new_state = chat_member.get("new_chat_member")
         if new_state and new_state.get("status") == "left":
             await self.__disptacher.send(
                 UnbridgeEvent(
                     chat=Chat(
+                        realm=Realm.TELEGRAM,
                         address=str(chat_member['chat']['id'])
                     )
                 )
             )
 
-    def __get_user(self, user: dict) -> tuple[str, str]:
+    def __get_user(
+        self,
+        user: dict[Any, Any]
+    ) -> tuple[str, str]:
         user_name: str = user['first_name']
         if user.get("last_name"):
             user_name = user_name + " " + user['last_name']
@@ -376,7 +431,7 @@ class TelegramClient(ChatHandlerFactory):
 
     def __extract_topic_name(
         self,
-        message: dict
+        message: dict[Any, Any]
     ) -> str | None:
         chat_id = message['chat']['id']
         topic_id = message.get("message_thread_id")

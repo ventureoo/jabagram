@@ -23,6 +23,7 @@ from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
 from jabagram.model import (
     Attachment,
+    Chat,
     ChatHandler,
     Event,
     Message,
@@ -38,19 +39,19 @@ from slixmpp.plugins.xep_0363.http_upload import HTTPError
 class XmppRoomHandler(ChatHandler):
     def __init__(
         self,
-        address: str,
+        chat: Chat,
         main_actor: XmppActor,
         actor_factory: XmppActorFactory,
         message_storage: MessageStorage,
         sticker_cache: StickerCache,
     ) -> None:
-        super().__init__(address)
+        super().__init__(chat)
         self.__main_actor = main_actor
         self.__actor_factory = actor_factory
-        self.__muc = JID(address)
+        self.__muc = JID(chat.address)
         self.__message_storage = message_storage
         self.__sticker_cache = sticker_cache
-        self.__logger = logging.getLogger(f"XmppRoomHandler {address}")
+        self.__logger = logging.getLogger(f"XmppRoomHandler {chat.address}")
 
     async def send_message(self, origin: Message) -> None:
         self.__logger.info("Sending message with id: %s", origin.id)
@@ -74,10 +75,10 @@ class XmppRoomHandler(ChatHandler):
         message.send()
 
         self.__message_storage.add(
-            chat_id=int(origin.chat.address),
-            muc=str(self.__muc),
-            stanza_id=message['id'],
-            telegram_id=origin.id,
+            source=origin.chat.address,
+            target=str(self.__muc),
+            target_message_id=message['id'],
+            source_message_id=origin.id,
             body=origin.text,
             topic_id=origin.chat.topic_id
         )
@@ -155,18 +156,18 @@ class XmppRoomHandler(ChatHandler):
         message.send()
 
         self.__message_storage.add(
-            chat_id=int(attachment.chat.address),
-            muc=str(self.__muc),
-            stanza_id=message['id'],
-            telegram_id=attachment.id,
+            source=attachment.chat.address,
+            target=str(self.__muc),
+            target_message_id=message['id'],
+            source_message_id=attachment.id,
             body=body,
             topic_id=attachment.chat.topic_id
         )
 
     async def edit_message(self, edited: Message) -> None:
         result = self.__message_storage.get_by_id(
-            chat_id=int(edited.chat.address),
-            muc=str(self.__muc),
+            source=edited.chat.address,
+            target=str(self.__muc),
             topic_id=edited.chat.topic_id,
             message_id=edited.id
         )
@@ -194,7 +195,7 @@ class XmppRoomHandler(ChatHandler):
             mtype="groupchat",
             mbody=mbody
         )
-        message['replace']['id'] = result.stanza_id
+        message['replace']['id'] = result.target_id
         message.send()
 
     async def send_event(self, event: Event) -> None:

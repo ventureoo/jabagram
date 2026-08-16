@@ -18,7 +18,9 @@
 
 import logging
 
+from gettext import gettext as _
 from datetime import datetime
+from jabagram.command import UserCommandHandler
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
 from jabagram.dispatcher import MessageDispatcher
@@ -26,6 +28,8 @@ from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
     Chat,
+    Realm,
+    ChatHandler,
     ChatHandlerFactory,
     Sender,
     Message,
@@ -41,7 +45,8 @@ class XmppClient(XmppActor, ChatHandlerFactory):
         self,
         jid: str,
         password: str,
-        service: ChatService,
+        chat_service: ChatService,
+        command_handler: UserCommandHandler,
         disptacher: MessageDispatcher,
         sticker_cache: StickerCache,
         message_storage: MessageStorage,
@@ -53,10 +58,10 @@ class XmppClient(XmppActor, ChatHandlerFactory):
             user_id=BRIDGE_DEAFAULT_ID,
             user_name=BRIDGE_DEAFAULT_NAME
         )
-        self.__logger = logging.getLogger(self.__class__.__name__)
-        self.__service = service
+        self.__chat_service = chat_service
         self.__dispatcher = disptacher
         self.__sticker_cache = sticker_cache
+        self.__command_handler = command_handler
         self.__message_storage = message_storage
         self.__actor_factory = XmppActorFactory(
             jid=jid,
@@ -64,46 +69,91 @@ class XmppClient(XmppActor, ChatHandlerFactory):
             pool_size_limit=actors_pool_size_limit,
             fallback=self
         )
-
-        self.add_event_handler("groupchat_message", self.__process_message)
+        self.__logger = logging.getLogger(self.__class__.__name__)
         self.add_event_handler("groupchat_direct_invite", self.__invite_callback)
-        self.__service.register_factory(self)
+        self.add_event_handler("message", self.__process_user_command)
+        self.add_event_handler("groupchat_message", self.__process_muc_message)
+
+    def realm(self):
+        return Realm.XMPP
 
     async def create_handler(
         self,
         address: str,
-        muc: str,
-    ) -> None:
+    ) -> ChatHandler | None:
         handler = XmppRoomHandler(
             main_actor=self,
-            address=muc,
+            chat=Chat(address=address, realm=Realm.XMPP),
             sticker_cache=self.__sticker_cache,
             message_storage=self.__message_storage,
             actor_factory=self.__actor_factory
         )
 
-        if (await self.join(muc)):
-            self.__dispatcher.add_handler(address, handler)
+        if (await self.join(address)):
+            return handler
+
+        return None
 
     async def _session_start(self, _):
         _ = await super()._session_start(_)
 
         if not self._reconnecting:
-            await self.__service.load_chats()
+            self.__chat_service.register_factory(Realm.XMPP, self)
+            await self.__chat_service.load_chats()
 
     async def __invite_callback(self, invite):
         muc = str(invite['groupchat_invite']['jid'])
-        key: str = invite['groupchat_invite']['reason']
-        await self.__service.bind(muc, key)
+        await self.join(muc)
 
 
-    async def __process_message(self, message):
+    # TODO: Rewrite using XEP-0050: Ad-Hoc Commands
+    async def __process_user_command(self, message):
+        if message['type'] != 'chat':
+            return
+
+
+        command: str = message['body']
+        sender: str = message['from'].bare
+
+        if not command.startswith("!jabagram"):
+            return
+
+        response = self.__command_handler.handle_direct_user_command(
+            Realm.XMPP,
+            command=command,
+            user=sender,
+        )
+        message.reply(response).send()
+
+    async def __process_muc_message(self, message):
         sender: str = message['mucnick']
         message_id: str = message['id']
         muc: str = message['mucroom']
         body: str = message['body'].strip()
 
-        if not self.__dispatcher.is_bound(muc):
+        if body.startswith("!jabagram"):
+            jid = self.plugin['xep_0045'].get_jid_property(
+                muc,
+                sender,
+                'jid'
+            )
+
+            if not jid:
+                message.reply(
+                    _("Bridge can’t get your JID to verify permissions. "
+                      "Please make bridge chat admin so that it can see other users' JIDs.")
+                ).send()
+                return
+
+            response = (await self.__command_handler.handle_chat_user_command(
+                source_chat=Chat(address=muc, realm=Realm.XMPP),
+                command=body,
+                user=jid.bare,
+            ))
+            message.reply(response).send()
+            return
+
+        if not self.__dispatcher.is_paired(muc):
             return
 
         if sender.endswith("(Telegram)") or sender == BRIDGE_DEAFAULT_NAME:
@@ -120,12 +170,11 @@ class XmppClient(XmppActor, ChatHandlerFactory):
 
             if url_start > 0:
                 caption = body[:url_start].strip()
-                self.__logger.info("caption", caption)
 
             fname: str = url.split("/")[-1]
             attachment = Attachment(
                 id=message_id,
-                chat=Chat(address=str(muc)),
+                chat=Chat(realm=Realm.XMPP, address=str(muc)),
                 sender=Sender(name=sender, id=""),
                 url_callback=url_callback,
                 fname=fname,
@@ -145,7 +194,7 @@ class XmppClient(XmppActor, ChatHandlerFactory):
 
             message = Message(
                 id=message_id,
-                chat=Chat(address=muc),
+                chat=Chat(realm=Realm.XMPP, address=muc),
                 sender=Sender(name=sender, id=""),
                 text=text if reply and text else body,
                 reply=reply,

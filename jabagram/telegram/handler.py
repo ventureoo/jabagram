@@ -24,8 +24,8 @@ from typing import Any
 from aiohttp import ClientConnectionError
 from datetime import datetime
 from gettext import gettext as _
-from jabagram.database.messages import MessageIdEntry, MessageStorage
-from jabagram.model import ChatHandler, Event, Message, Attachment
+from jabagram.database.messages import MessageStorage
+from jabagram.model import Chat, ChatHandler, Event, Message, Attachment
 from jabagram.telegram.api import TelegramApi, TelegramApiError
 
 # When an XMPP user replies to a message coming from a side topic, all of his
@@ -58,14 +58,14 @@ class TopicTimeoutEntry():
 class TelegramChatHandler(ChatHandler):
     def __init__(
         self,
-        address: str,
+        chat: Chat,
         api: TelegramApi,
         message_storage: MessageStorage,
     ) -> None:
-        super().__init__(address)
-        self.__address = address
+        super().__init__(chat)
+        self.__chat = chat
         self.__message_storage = message_storage
-        self.__logger = logging.getLogger(f"TelegramChatHandler ({address})")
+        self.__logger = logging.getLogger(f"TelegramChatHandler ({chat.address})")
         self.__api = api
         self.__residence_map: dict[str, TopicTimeoutEntry] = {}
 
@@ -85,21 +85,21 @@ class TelegramChatHandler(ChatHandler):
     async def send_message(self, origin: Message) -> None:
         params: dict[str, Any] = {
             "text": f"{origin.sender.name}: {origin.text}",
-            "chat_id": self.address,
+            "chat_id": int(self.__chat.address),
             "entities": self.__make_bold_sender_name(origin.sender.name)
         }
         entry = self.__residence_map.get(origin.sender.name)
 
         if origin.reply:
             result = self.__message_storage.get_by_body(
-                chat_id=int(self.__address),
+                target=origin.chat.address,
+                source=self.__chat.address,
                 topic_id=None,
-                muc=origin.chat.address,
                 body=origin.reply,
             )
             if result:
                 params["text"] = f"{origin.sender.name}: {origin.text}"
-                params["reply_to_message_id"] = result.telegram_id
+                params["reply_to_message_id"] = result.source_id
 
                 if result.topic_id:
                     params["message_thread_id"] = result.topic_id
@@ -137,10 +137,10 @@ class TelegramChatHandler(ChatHandler):
         try:
             response = await self.__api.sendMessage(**params)
             self.__message_storage.add(
-                chat_id=int(self.__address),
-                muc=origin.chat.address,
-                stanza_id=origin.id,
-                telegram_id=response['message_id'],
+                target=self.__chat.address,
+                source=origin.chat.address,
+                source_message_id=origin.id,
+                target_message_id=response['message_id'],
                 body=origin.text,
                 topic_id=response.get("message_thread_id")
             )
@@ -176,7 +176,7 @@ class TelegramChatHandler(ChatHandler):
                         caption = f"{caption} {attachment.text}"
 
                     params: dict[str, Any] = {
-                        "chat_id": self.address,
+                        "chat_id": self.__chat.address,
                         "caption": caption,
                         "caption_entities": self.__make_bold_sender_name(
                             attachment.sender.name
@@ -209,10 +209,10 @@ class TelegramChatHandler(ChatHandler):
                     try:
                         response = await method(form_data, **params)
                         self.__message_storage.add(
-                            chat_id=int(self.__address),
-                            muc=attachment.chat.address,
-                            stanza_id=attachment.id,
-                            telegram_id=response['message_id'],
+                            target=self.__chat.address,
+                            source=attachment.chat.address,
+                            source_message_id=attachment.id,
+                            target_message_id=response['message_id'],
                             body=f"{attachment.text}\n{url}" if attachment.text else url,
                             topic_id=response.get("message_thread_id")
                         )
@@ -221,7 +221,7 @@ class TelegramChatHandler(ChatHandler):
                     except TelegramApiError as error:
                         try:
                             await self.__api.sendMessage(
-                                chat_id=self.address,
+                                chat_id=self.__chat.address,
                                 text=(
                                     "Couldn't transfer file"
                                     f"{attachment.fname} "
@@ -242,9 +242,9 @@ class TelegramChatHandler(ChatHandler):
 
     async def edit_message(self, edited: Message) -> None:
         result = self.__message_storage.get_by_id(
-            chat_id=int(self.__address),
+            target=self.__chat.address,
             topic_id=None,
-            muc=edited.chat.address,
+            source=edited.chat.address,
             message_id=edited.id
         )
 
@@ -256,18 +256,18 @@ class TelegramChatHandler(ChatHandler):
             return
 
         params = {
-            "chat_id": self.address,
+            "chat_id": self.__chat.address,
             "text": f"{edited.sender.name}: {edited.text}",
-            "message_id": result.telegram_id,
+            "message_id": result.target_id,
             "entities": self.__make_bold_sender_name(edited.sender.name)
         }
 
         if edited.reply:
             # Be sure that replies to messages was sent as native in Telegram
             if self.__message_storage.get_by_body(
-                chat_id=int(self.__address),
+                target=edited.chat.address,
+                source=self.__chat.address,
                 topic_id=edited.chat.topic_id,
-                muc=edited.chat.address,
                 body=edited.reply
             ):
                 params["text"] = f"{edited.sender.name}: {edited.text}"
@@ -290,22 +290,14 @@ class TelegramChatHandler(ChatHandler):
                 ]
                 params["entities"] = dumps(format)
         try:
-            response = await self.__api.editMessageText(**params)
-            self.__message_storage.add(
-                chat_id=int(self.__address),
-                muc=edited.chat.address,
-                stanza_id=edited.id,
-                telegram_id=response['message_id'],
-                body=edited.text,
-                topic_id=response.get("message_thread_id")
-            )
+            await self.__api.editMessageText(**params)
         except TelegramApiError as error:
             self.__logger.error("Error while editing a message: %s", error)
 
     async def send_event(self, event: Event) -> None:
         try:
             await self.__api.sendMessage(
-                chat_id=self.address,
+                chat_id=self.__chat.address,
                 text=event.text
             )
         except TelegramApiError as error:
@@ -316,12 +308,12 @@ class TelegramChatHandler(ChatHandler):
     async def unbridge(self) -> None:
         try:
             await self.__api.sendMessage(
-                chat_id=self.address,
+                chat_id=self.__chat.address,
                 text=(_("This chat was automatically unbridged due to a bot kick in XMPP.\n"
                         "If you want to bridge it again, invite this bot to this"
                         " chat again and use the /jabagram command."))
             )
-            await self.__api.leaveChat(chat_id=self.address)
+            await self.__api.leaveChat(chat_id=self.__chat.address)
         except TelegramApiError as error:
             self.__logger.error(
                 "Failed to unbridge chat: %s", error

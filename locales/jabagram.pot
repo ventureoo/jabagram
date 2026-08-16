@@ -8,44 +8,110 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-01-27 18:18+0300\n"
+"POT-Creation-Date: 2026-08-16 18:06+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "Language: \n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: jabagram/telegram/client.py:145
-#, python-brace-format
-msgid ""
-"Specified room has been successfully placed on the queue. Please invite this "
-"{} bot to your XMPP room, and as the reason for the invitation specify the "
-"secret key that is specified in bot's config or ask the owner of this bridge "
-"instance for it.\n"
-"\n"
-"If you have specified an incorrect room address, simply repeat the pair "
-"command (/jabagram) with the corrected address."
+#: jabagram/command.py:48 jabagram/command.py:80
+msgid "Missed subcommand"
 msgstr ""
 
-#: jabagram/telegram/client.py:158
-msgid ""
-"Please specify the MUC address of room you want to pair with this Telegram "
-"chat."
+#: jabagram/command.py:53
+msgid "Missed secret key for verification"
 msgstr ""
 
-#: jabagram/telegram/client.py:166
+#: jabagram/command.py:58
+msgid "You already verified user"
+msgstr ""
+
+#: jabagram/command.py:63
+msgid "Wrong secret key is used"
+msgstr ""
+
+#: jabagram/command.py:66
+msgid "You are successfully verified"
+msgstr ""
+
+#: jabagram/command.py:68 jabagram/command.py:167
+msgid "Invalid subcommand specified"
+msgstr ""
+
+#: jabagram/command.py:89
+msgid "You're not verified user to execute any commands"
+msgstr ""
+
+#: jabagram/command.py:95
+msgid ""
+"Please specify the another gateway with which you want to pair this Telegram "
+"chat, it can be: xmpp"
+msgstr ""
+
+#: jabagram/command.py:103
+msgid ""
+"Please specify the target address of room you want to pair with this "
+"Telegram chat."
+msgstr ""
+
+#: jabagram/command.py:116
 msgid "You have specified an incorrect room JID. Please try again."
 msgstr ""
 
-#: jabagram/telegram/handler.py:316
+#: jabagram/command.py:121
+msgid "You have specified an incorrect target gateway. Please try again."
+msgstr ""
+
+#: jabagram/command.py:132
+msgid "This chat is already paired with specified room."
+msgstr ""
+
+#: jabagram/command.py:137
+msgid ""
+"Specified room has been already placed on the queue, so it can not be paired "
+"with this chat again\n"
+msgstr ""
+
+#: jabagram/command.py:142
+msgid ""
+"Specified room has been successfully placed on the queue. Please invite this "
+"bot to target chat.\n"
+"If you have specified an incorrect room address, simply repeat the pair "
+"command with the corrected address."
+msgstr ""
+
+#: jabagram/command.py:150
+msgid "There are no pairing requests for this chat."
+msgstr ""
+
+#: jabagram/command.py:154
+msgid "This chat was successfully paired."
+msgstr ""
+
+#: jabagram/command.py:159
+msgid "This chat is not paired with any other chat."
+msgstr ""
+
+#: jabagram/command.py:164
+msgid "Chat has been successfully unpaired. You can kick this bot."
+msgstr ""
+
+#: jabagram/telegram/handler.py:312
 msgid ""
 "This chat was automatically unbridged due to a bot kick in XMPP.\n"
 "If you want to bridge it again, invite this bot to this chat again and use "
 "the /jabagram command."
 msgstr ""
 
-#: jabagram/xmpp/handler.py:207
+#: jabagram/xmpp/client.py:143
+msgid ""
+"Bridge can’t get your JID to verify permissions. Please make bridge chat "
+"admin so that it can see other users' JIDs."
+msgstr ""
+
+#: jabagram/xmpp/handler.py:212
 msgid "This chat was automatically unbridged due to a bot kick in Telegram."
 msgstr ""

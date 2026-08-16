@@ -55,7 +55,7 @@ class XmppActor(ClientXMPP):
         user_id: str,
         user_name: str
     ):
-        ClientXMPP.__init__(self, f'{jid}/{user_id}', password)
+        super().__init__(f'{jid}/{user_id}', password)
         self._reconnecting = None
         self.__logger = logging.getLogger(
             f"{__class__.__name__}/{user_id}"

@@ -16,36 +16,68 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 from jabagram.database.base import SqliteTable
+from jabagram.model import Chat, Realm
 
 class ChatStorage(SqliteTable):
-    def __init__(self, path):
+    def __init__(self, path: str):
         super().__init__(path=path)
 
     def create(self) -> bool:
         if self._execute(
-            statement="CREATE TABLE IF NOT EXISTS chats(telegram_id, muc)"
+            statement=(
+                "CREATE TABLE IF NOT EXISTS chats"
+                "(source TEXT NOT NULL, target TEXT NOT NULL,"
+                "source_realm INTEGER NOT NULL CHECK ( source_realm IN (1, 2) ),"
+                "target_realm INTEGER NOT NULL CHECK ( target_realm IN (1, 2) ))"
+            )
         ) is None:
             return False
 
         return True
 
-    def add(self, chat: str, muc: str) -> None:
+    def add(self, source: Chat, target: Chat) -> None:
         self._execute(
-            chat,
-            muc,
-            statement="INSERT INTO chats(telegram_id, muc) VALUES (?, ?)",
+            source.address,
+            target.address,
+            source.realm.value,
+            target.realm.value,
+            statement=(
+                "INSERT INTO chats(source, target,"
+                "source_realm, target_realm) VALUES (?, ?, ?, ?)"),
             on_error_message="Failed to add chats"
         )
 
-    def get(self) -> list | None:
-        return self._execute(
-            statement="SELECT telegram_id,muc FROM chats",
+    def get(self) -> list[tuple[Chat, Chat]] | None:
+        pairs = self._execute(
+            statement=(
+                "SELECT source, target, source_realm, target_realm FROM chats"
+            ),
             on_error_message="Failed to get chats"
         )
 
-    def remove(self, chat: str) -> None:
+        if not pairs:
+            return None
+
+        result = []
+
+        for pair in pairs:
+            (source, target, source_realm, target_realm) = pair
+            result.append(
+                (Chat(address=source, realm=Realm(source_realm)),
+                 Chat(address=target, realm=Realm(target_realm)))
+            )
+
+        return result
+
+    def remove(self, chat: Chat) -> None:
         self._execute(
-            chat,
-            statement="DELETE FROM chats WHERE telegram_id = ? OR muc = ?",
+            chat.address,
+            chat.address,
+            chat.realm.value,
+            chat.realm.value,
+            statement=(
+                "DELETE FROM chats WHERE (source = ? OR target = ?) AND "
+                "(source_realm = ? OR target_realm = ?)"
+            ),
             on_error_message="Failed to remove chats"
         )

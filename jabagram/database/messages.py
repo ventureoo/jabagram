@@ -22,12 +22,12 @@ from typing import NamedTuple
 from jabagram.database.base import SqliteTable
 
 class MessageIdEntry(NamedTuple):
-    telegram_id: int
-    stanza_id: str
+    source_id: str
+    target_id: str
     topic_id: int | None
 
 class MessageStorage(SqliteTable):
-    def __init__(self, path):
+    def __init__(self, path: str):
         self.__logger = logging.getLogger(__class__.__name__)
         super().__init__(path=path)
 
@@ -35,9 +35,9 @@ class MessageStorage(SqliteTable):
         if self._execute(
             statement=(
                 "CREATE TABLE IF NOT EXISTS messages"
-                "(telegram_id INTEGER UNIQUE NOT NULL, stanza_id TEXT UNIQUE NOT NULL,"
-                "body TEXT NOT NULL, chat_id INTEGER NOT NULL, topic_id INTEGER,"
-                "muc TEXT NOT NULL)"
+                "(source_message_id TEXT UNIQUE NOT NULL, target_message_id TEXT UNIQUE NOT NULL,"
+                "body TEXT, source TEXT NOT NULL, topic_id INTEGER,"
+                "target TEXT NOT NULL)"
             )
         ) is None:
             return False
@@ -45,43 +45,43 @@ class MessageStorage(SqliteTable):
         return True
 
     def add(self,
-        chat_id: int,
+        source: str,
+        target: str,
+        source_message_id: str,
+        target_message_id: str,
         topic_id: int | None,
         body: str,
-        telegram_id: str,
-        muc: str,
-        stanza_id: str
     ) -> None:
         digest = hashlib.sha256(body.encode()).hexdigest()
         self._execute(
-            telegram_id,
-            stanza_id,
+            source_message_id,
+            target_message_id,
             digest,
-            chat_id,
+            source,
             topic_id,
-            muc,
+            target,
             statement=(
-                'INSERT INTO messages(telegram_id, stanza_id, body, chat_id,'
-                'topic_id, muc) VALUES (?, ?, ?, ?, ?, ?)'
+                "INSERT INTO messages(source_message_id, target_message_id,"
+                "body, source, topic_id, target) VALUES (?, ?, ?, ?, ?, ?)"
             ),
             on_error_message="Failed to insert message in table"
         )
 
     def get_by_id(
         self,
-        chat_id: int,
+        source: str,
         topic_id: int | None,
-        muc: str,
+        target: str,
         message_id: str
     ) -> MessageIdEntry | None:
         statement = (
-            "SELECT telegram_id, stanza_id FROM messages WHERE"
-            " chat_id = ? AND muc = ? AND (stanza_id = ? OR telegram_id = ?)"
+            "SELECT source_message_id, target_message_id, topic_id FROM messages WHERE"
+            " source = ? AND target = ? AND (source_message_id = ? OR target_message_id = ?)"
         )
 
         args = (
-            chat_id,
-            muc,
+            source,
+            target,
             message_id,
             message_id,
         )
@@ -99,7 +99,7 @@ class MessageStorage(SqliteTable):
         if not message:
             self.__logger.error(
                 "Cache miss for message with %s id",
-                message_id
+                message_id,
             )
             return None
 
@@ -107,20 +107,20 @@ class MessageStorage(SqliteTable):
 
     def get_by_body(
         self,
-        chat_id: int,
+        source: str,
         topic_id: int | None,
-        muc: str,
+        target: str,
         body: str
     ) -> MessageIdEntry | None:
         statement = (
-            "SELECT telegram_id, stanza_id, topic_id FROM messages WHERE"
-            " chat_id = ? AND muc = ? AND body = ?"
+            "SELECT source_message_id, target_message_id, topic_id FROM messages WHERE"
+            " source = ? AND target = ? AND body = ?"
         )
         digest = hashlib.sha256(body.encode()).hexdigest()
 
         args = (
-            chat_id,
-            muc,
+            source,
+            target,
             digest,
         )
 
@@ -137,7 +137,7 @@ class MessageStorage(SqliteTable):
         if not message:
             self.__logger.error(
                 "Cache miss for message with %s body",
-                digest
+                digest,
             )
             return None
 

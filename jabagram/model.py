@@ -17,12 +17,18 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 from abc import ABC, abstractmethod
+from enum import Enum
 from dataclasses import dataclass, field
 from typing import Callable
 
-@dataclass(kw_only=True)
+class Realm(Enum):
+    TELEGRAM = 1
+    XMPP = 2
+
+@dataclass(kw_only=True, frozen=True)
 class Chat():
     address: str
+    realm: Realm
     topic_id: int | None = None
 
 @dataclass(kw_only=True)
@@ -61,8 +67,8 @@ class Sticker(Attachment):
     file_id: str
 
 class ChatHandler(ABC):
-    def __init__(self, address: str) -> None:
-        self.__address = address
+    def __init__(self, chat: Chat) -> None:
+        self.__chat = chat
 
     @abstractmethod
     async def send_message(self, origin: Message) -> None:
@@ -85,15 +91,17 @@ class ChatHandler(ABC):
         pass
 
     @property
-    def address(self):
-        return self.__address
-
+    def chat(self):
+        return self.__chat
 
 class ChatHandlerFactory(ABC):
     @abstractmethod
     async def create_handler(
         self,
         address: str,
-        muc: str,
-    ) -> None:
+    ) -> ChatHandler | None:
+        pass
+
+    @abstractmethod
+    def realm(self) -> Realm:
         pass
