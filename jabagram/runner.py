@@ -31,7 +31,7 @@ from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.service import ChatService
 from jabagram.telegram.client import TelegramClient
-from jabagram.xmpp.client import XmppClient
+from jabagram.xmpp.client import XmppListener, XmppConnectionSettings
 from os import path
 
 CONFIG_FILE_NOT_FOUND = """
@@ -128,6 +128,20 @@ def main():
             admin_storage=admin_storage
         )
 
+        jid = config.get("xmpp", "login")
+        secret = config.get("xmpp", "password")
+        host = None
+        upload_domain = None
+        port = 5347
+        try:
+            host = config.get("xmpp", "component_host")
+            port = int(config.get("xmpp", "component_port"))
+            upload_domain = config.get("xmpp", "upload_domain")
+        except configparser.NoOptionError:
+            pass
+        except ValueError:
+            pass
+
         telegram = TelegramClient(
             token=config.get("telegram", "token"),
             jid=config.get("xmpp", "login"),
@@ -137,15 +151,20 @@ def main():
             message_storage=message_storage,
             topic_name_cache=topic_name_cache
         )
-        xmpp = XmppClient(
-            jid=config.get("xmpp", "login"),
-            password=config.get("xmpp", "password"),
+        xmpp = XmppListener(
+            settings=XmppConnectionSettings(
+                jid=jid,
+                secret=secret,
+                host=host,
+                port=port
+            ),
             chat_service=chat_service,
             disptacher=dispatcher,
             sticker_cache=sticker_cache,
             command_handler=command_handler,
             message_storage=message_storage,
-            actors_pool_size_limit=actors_pool_size_limit
+            actors_pool_size_limit=actors_pool_size_limit,
+            upload_domain=upload_domain,
         )
         loop.create_task(telegram.start())
         loop.create_task(xmpp.start())

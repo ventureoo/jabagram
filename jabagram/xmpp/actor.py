@@ -16,18 +16,26 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+from abc import abstractmethod
 import asyncio
 import logging
+from pathlib import Path
 import re
 import stringprep
 
 from functools import lru_cache
 from collections import OrderedDict
+from aiohttp import ClientSession
 
-from unidecode import unidecode
-from slixmpp import ClientXMPP, JID
-from slixmpp.stanza import Message
+from abc import ABC
+from jabagram.model import Sender
+from slixmpp import ClientXMPP, JID, BaseXMPP
+from slixmpp.componentxmpp import ComponentXMPP
 from slixmpp.exceptions import PresenceError
+from slixmpp.stanza import Message
+from slixmpp.types import PresenceArgs
+from typing import IO, override
+from unidecode import unidecode
 
 # XMPP does not support all available characters for resourcepart in JIDs, so
 # we need to filter a range of characters.
@@ -47,36 +55,35 @@ BLACKLIST_USERNAME_CHARS = (
 RTL_CHAR_PATTERN = re.compile(r'[\u0590-\u05FF\u0600-\u06FF]')
 XMPP_OCCUPANT_ERROR = "Only occupants are allowed to send messages to the conference"
 
-class XmppActor(ClientXMPP):
+class XmppActor(ABC):
     def __init__(
         self,
-        jid: str,
-        password: str,
-        user_id: str,
-        user_name: str
+        client: BaseXMPP,
+        user: Sender,
+        upload_domain: str | None
     ):
-        super().__init__(f'{jid}/{user_id}', password)
-        self._reconnecting = None
+        self.__client = client
         self.__logger = logging.getLogger(
-            f"{__class__.__name__}/{user_id}"
+            f"{__class__.__name__}/{user.id}"
         )
-
-        self.__name = user_name
+        self.__id = user.id
+        self.__name = self.__validate_name(user.name) + " (Telegram)"
         self.__rooms: list[str] = []
+        self.__upload_domain = upload_domain
 
         for xep in ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
                     'xep_0308', 'xep_0045', 'xep_0066', 'xep_0199'):
-            self.register_plugin(xep)
+            self.__client.register_plugin(xep)
 
         self.__start_event = asyncio.Event()
-        self.add_event_handler("session_start", self._session_start)
-        self.add_event_handler("groupchat_message_error", self.__process_errors)
-        self.add_event_handler("disconnected", self.__on_connection_reset)
-        self.add_event_handler("connected", self.__on_connected)
+        self._reconnecting = None
+        self.__client.add_event_handler("session_start", self._session_start)
+        self.__client.add_event_handler("groupchat_message_error", self.__process_errors)
+        self.__client.add_event_handler("disconnected", self.__on_connection_reset)
+        self.__client.add_event_handler("connected", self.__on_connected)
 
     async def _session_start(self, _):
-        await self.get_roster()
-        self.send_presence()
+        self.__client.send_presence()
         self.__start_event.set()
 
         if self._reconnecting:
@@ -100,7 +107,87 @@ class XmppActor(ClientXMPP):
         # Wait for synchronous handlers
         await asyncio.sleep(5)
 
-        self.connect()
+        self.__client.connect()
+
+    async def upload_file(
+        self,
+        filename: Path,
+        size: int,
+        content_type: str | None = None,
+        input_file: IO[bytes] | None = None
+    ):
+        xep_0363 = self.__client.plugin['xep_0363']
+
+        info_iq = await xep_0363.find_upload_service(
+            domain=self.__upload_domain
+        )
+
+        if info_iq is None:
+            return None
+
+        service = info_iq['from']
+        for form in info_iq['disco_info'].iterables:
+            values = form['values']
+            if values['FORM_TYPE'] == ['urn:xmpp:http:upload:0']:
+                try:
+                    if size >= int(values['max-file-size']):
+                        self.__logger.error(
+                            "Max file size exceeded: %s", size
+                        )
+                        return None
+                except (TypeError, ValueError):
+                    self.__logger.error(
+                        "Invalid max size received from HTTP File Upload service"
+                    )
+                break
+
+        slot_iq = await xep_0363.request_slot(
+            service,
+            filename,
+            size,
+            content_type,
+            ifrom=self.get_from_value()
+        )
+        slot = slot_iq['http_upload_slot']
+
+        headers = {
+            'Content-Length': str(size),
+            'Content-Type': content_type or "application/octet-stream",
+            **{header['name']: header['value'] for header in slot['put']['headers']}
+        }
+
+        url = None
+        async with ClientSession(
+            headers={'User-Agent': 'jabagram'}
+        ) as session:
+            response = await session.put(
+                    slot['put']['url'],
+                    data=input_file,
+                    headers=headers,
+            )
+            if response.status >= 400:
+                self.__logger.error(
+                    "Failed to upload file: %s",
+                    response.status
+                )
+                return None
+
+            response.close()
+            url = slot['get']['url']
+
+        return url
+
+    def get_jid(
+        self,
+        room: JID,
+        nick: str,
+    ) -> JID | None:
+        jid = self.__client.plugin['xep_0045'].get_jid_property(
+            room=room,
+            nick=nick,
+            jid_property="jid",
+        )
+        return jid
 
     async def __process_errors(self, message: Message):
         room: str = message['from'].bare
@@ -115,13 +202,21 @@ class XmppActor(ClientXMPP):
             "Trying to join %s room...", muc
         )
 
+        if self.__client.is_component:
+            presence_options = PresenceArgs(
+                pfrom=str(self.get_from_value())
+            )
+        else:
+            presence_options = None
+
         for _ in range(5):
             try:
-                await self.plugin['xep_0045'].join_muc_wait(
+                await self.__client.plugin['xep_0045'].join_muc_wait(
                     room=JID(muc),
                     nick=self.__name,
                     maxstanzas=0,
-                    timeout=5
+                    timeout=5,
+                    presence_options=presence_options
                 )
                 break
             except TimeoutError:
@@ -141,76 +236,37 @@ class XmppActor(ClientXMPP):
 
     def leave(self, muc: str):
         if muc in self.__rooms:
-            self.plugin['xep_0045'].leave_muc(
+            self.__client.plugin['xep_0045'].leave_muc(
                 room=JID(muc),
-                nick=self.__name
+                nick=self.__name,
+                pfrom=self.get_from_value()
             )
             self.__rooms.remove(muc)
 
     async def start(self):
-        self.connect()
+        self.__client.connect()
         await asyncio.wait_for(self.__start_event.wait(), 15)
 
     async def destroy(self):
         self._reconnecting = False
-        self.disconnect()
+        self.__client.disconnect()
 
-class XmppActorFactory():
-    def __init__(
-        self,
-        jid: str,
-        password: str,
-        pool_size_limit: int,
-        fallback: XmppActor
-    ):
-        self.__jid = jid
-        self.__fallback = fallback
-        self.__actors_pool: OrderedDict[str, XmppActor] = OrderedDict()
-        self.__password = password
-        self.__pool_size_limit = pool_size_limit
-        self.__logger = logging.getLogger(__class__.__name__)
+    def make_message(self, *args, **kwargs) -> Message:
+        kwargs["mfrom"] = self.get_from_value()
 
-    async def get_actor(
-        self,
-        user_id: str,
-        user_name: str,
-        muc: str
-    ) -> XmppActor:
-        user_name = self.__validate_name(user_name) + " (Telegram)"
+        message = self.__client.make_message(
+            *args,
+            **kwargs,
+        )
+        return message
 
-        if user_id in self.__actors_pool.keys():
-            self.__actors_pool.move_to_end(user_id)
-            actor = self.__actors_pool[user_id]
-        else:
-            self.__logger.info(
-                f"Trying to create actor with {self.__jid}/{user_id}"
-            )
-            actor = XmppActor(
-                jid=self.__jid,
-                password=self.__password,
-                user_name=user_name,
-                user_id=user_id
-            )
-            self.__actors_pool[user_id] = actor
-            self.__actors_pool.move_to_end(user_id)
+    @abstractmethod
+    def get_from_value(self) -> JID | None:
+        pass
 
-            if len(self.__actors_pool) > self.__pool_size_limit:
-                (_, removed) = self.__actors_pool.popitem(last=False)
-                await removed.destroy()
-
-            await actor.start()
-
-        if not (await actor.join(muc)):
-            return self.__fallback
-
-        return actor
-
-    def leave(self, muc: str):
-        # TODO: Optimize it
-        self.__fallback.leave(muc)
-
-        for _, actor in self.__actors_pool.items():
-            actor.leave(muc)
+    @abstractmethod
+    def client(self) -> BaseXMPP:
+        pass
 
     @lru_cache(maxsize=100)
     def __validate_name(self, sender: str) -> str:
@@ -226,3 +282,119 @@ class XmppActorFactory():
                 valid.append(char)
 
         return "".join(valid)
+
+class XmppUserActor(XmppActor):
+    def __init__(
+        self,
+        jid: str,
+        password: str,
+        user: Sender,
+    ):
+        client = ClientXMPP(
+            jid=f'{jid}/{user.id}',
+            password=password
+        )
+        super().__init__(
+            client=client,
+            user=user,
+            upload_domain=None
+        )
+
+    @override
+    def get_from_value(self) -> JID | None:
+        return None
+
+    @override
+    def client(self) -> ClientXMPP:
+        return self.__client
+
+class XmppComponentActor(XmppActor):
+    def __init__(
+        self,
+        client: ComponentXMPP,
+        user: Sender,
+        upload_domain: str | None
+    ):
+        super().__init__(
+            client=client,
+            user=user,
+            upload_domain=upload_domain
+        )
+        self.__user = user
+        self.__client = client
+
+    @override
+    def get_from_value(self) -> JID | None:
+        return JID(f"{self.__user.id}@{self.__client.boundjid.bare}")
+
+    @override
+    def client(self) -> ComponentXMPP:
+        return self.__client
+
+class XmppActorFactory():
+    def __init__(
+        self,
+        listener: XmppActor,
+        upload_domain: str | None,
+        pool_size_limit: int = 16,
+    ):
+        self.__actors_pool: OrderedDict[str, XmppActor] = OrderedDict()
+        self.__pool_size_limit = pool_size_limit
+        self.__logger = logging.getLogger(__class__.__name__)
+        self.__listener = listener
+        self.__client = self.__listener.client()
+        self.__jid = self.__client.boundjid
+        self.__upload_domain = upload_domain
+
+    async def get_actor(
+        self,
+        user: Sender | None,
+        muc: str
+    ) -> XmppActor:
+        if not user:
+            return self.__listener
+
+        if user.id in self.__actors_pool.keys():
+            self.__actors_pool.move_to_end(user.id)
+            actor = self.__actors_pool[user.id]
+        else:
+            self.__logger.info(
+                f"Trying to create actor with {self.__jid}/{user.id}"
+            )
+
+            if isinstance(self.__client, ClientXMPP):
+                actor = XmppUserActor(
+                    jid=self.__client.jid,
+                    password=self.__client.password,
+                    user=user,
+                )
+            elif isinstance(self.__client, ComponentXMPP):
+                actor = XmppComponentActor(
+                    client=self.__client,
+                    user=user,
+                    upload_domain=self.__upload_domain,
+                )
+            else:
+                return self.__listener
+
+            self.__actors_pool[user.id] = actor
+            self.__actors_pool.move_to_end(user.id)
+
+            if len(self.__actors_pool) > self.__pool_size_limit:
+                (_, removed) = self.__actors_pool.popitem(last=False)
+                await removed.destroy()
+
+            if not self.__client.is_component:
+                await actor.start()
+
+        if not (await actor.join(muc)):
+            return self.__listener
+
+        return actor
+
+    def leave(self, muc: str):
+        # TODO: Optimize it
+        self.__listener.leave(muc)
+
+        for _, actor in self.__actors_pool.items():
+            actor.leave(muc)

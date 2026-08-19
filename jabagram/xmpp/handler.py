@@ -26,11 +26,13 @@ from jabagram.model import (
     Chat,
     ChatHandler,
     Event,
+    Sender,
     Message,
     Sticker,
 )
-from jabagram.xmpp.actor import XmppActorFactory, XmppActor
+from jabagram.xmpp.actor import XmppActorFactory
 
+from aiohttp import ClientConnectionError
 from pathlib import Path
 from slixmpp.exceptions import IqTimeout, IqError
 from slixmpp.jid import JID
@@ -40,13 +42,11 @@ class XmppRoomHandler(ChatHandler):
     def __init__(
         self,
         chat: Chat,
-        main_actor: XmppActor,
         actor_factory: XmppActorFactory,
         message_storage: MessageStorage,
         sticker_cache: StickerCache,
     ) -> None:
         super().__init__(chat)
-        self.__main_actor = main_actor
         self.__actor_factory = actor_factory
         self.__muc = JID(chat.address)
         self.__message_storage = message_storage
@@ -63,9 +63,11 @@ class XmppRoomHandler(ChatHandler):
             mbody = f"{reply_body}\n{origin.text}"
 
         actor = await self.__actor_factory.get_actor(
-            origin.sender.id,
-            origin.sender.name,
-            str(self.__muc)
+            user=Sender(
+                id=origin.sender.id,
+                name=origin.sender.name
+            ),
+            muc=str(self.__muc)
         )
         message = actor.make_message(
             mto=self.__muc,
@@ -114,28 +116,33 @@ class XmppRoomHandler(ChatHandler):
             url = await attachment.url_callback()
 
         actor = await self.__actor_factory.get_actor(
-            attachment.sender.id,
-            attachment.sender.name,
-            str(self.__muc)
+            user=Sender(
+                id=attachment.sender.id,
+                name=attachment.sender.name
+            ),
+            muc=str(self.__muc)
         )
-
-        upload_file = actor.plugin['xep_0363'].upload_file
 
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(url) as resp:
-                    url = await upload_file(
+                    url = await actor.upload_file(
                         filename=Path(attachment.fname or f"File from {attachment.sender.name}"),
                         size=attachment.fsize or resp.content_length,
                         content_type=attachment.mime or resp.content_type,
                         input_file=resp.content # type: ignore
                     )
-                    if isinstance(attachment, Sticker):
+                    if isinstance(attachment, Sticker) and url:
                         self.__sticker_cache.add(
                             attachment.file_id, url
                         )
 
-            except (HTTPError, aiohttp.ClientConnectionError, IqTimeout, IqError) as error:
+            except(
+                HTTPError,
+                ClientConnectionError,
+                IqTimeout,
+                IqError
+            ) as error:
                 self.__logger.error("Cannot upload file: %s", error)
                 return
 
@@ -181,9 +188,11 @@ class XmppRoomHandler(ChatHandler):
 
         mbody = edited.text
         actor = await self.__actor_factory.get_actor(
-            edited.sender.id,
-            edited.sender.name,
-            str(self.__muc)
+            user=Sender(
+                id=edited.sender.id,
+                name=edited.sender.name
+            ),
+            muc=str(self.__muc)
         )
 
         if edited.reply:
@@ -199,14 +208,25 @@ class XmppRoomHandler(ChatHandler):
         message.send()
 
     async def send_event(self, event: Event) -> None:
-        self.__main_actor.send_message(
+        actor = await self.__actor_factory.get_actor(
+            user=None,
+            muc=str(self.__muc)
+        )
+
+        message = actor.make_message(
             mto=self.__muc,
             mbody=event.text,
             mtype="groupchat"
         )
+        message.send()
 
     async def unbridge(self) -> None:
-        self.__main_actor.send_message(
+        actor = await self.__actor_factory.get_actor(
+            user=None,
+            muc=str(self.__muc)
+        )
+
+        message = actor.make_message(
             mto=self.__muc,
             mbody=_(
                 "This chat was automatically unbridged "
@@ -214,4 +234,5 @@ class XmppRoomHandler(ChatHandler):
             ),
             mtype="groupchat"
         )
+        message.send()
         self.__actor_factory.leave(str(self.__muc))

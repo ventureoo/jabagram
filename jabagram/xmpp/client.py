@@ -16,10 +16,15 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+from dataclasses import dataclass
 import logging
 
 from gettext import gettext as _
 from datetime import datetime
+from typing import override
+
+from slixmpp import JID, ClientXMPP
+from slixmpp.componentxmpp import ComponentXMPP
 from jabagram.command import UserCommandHandler
 from jabagram.database.messages import MessageStorage
 from jabagram.database.stickers import StickerCache
@@ -34,29 +39,47 @@ from jabagram.model import (
     Sender,
     Message,
 )
-from jabagram.xmpp.actor import XmppActor, XmppActorFactory
+from jabagram.xmpp.actor import XmppActorFactory, XmppActor
 from jabagram.xmpp.handler import XmppRoomHandler
 
 BRIDGE_DEAFAULT_ID = "listener"
 BRIDGE_DEAFAULT_NAME = "Telegram Bridge"
 
-class XmppClient(XmppActor, ChatHandlerFactory):
+@dataclass
+class XmppConnectionSettings():
+    jid: str
+    secret: str
+    host: str | None
+    port: int | None
+
+class XmppListener(XmppActor, ChatHandlerFactory):
     def __init__(
         self,
-        jid: str,
-        password: str,
+        settings: XmppConnectionSettings,
         chat_service: ChatService,
         command_handler: UserCommandHandler,
         disptacher: MessageDispatcher,
         sticker_cache: StickerCache,
         message_storage: MessageStorage,
-        actors_pool_size_limit: int
+        actors_pool_size_limit: int,
+        upload_domain: str | None,
     ) -> None:
+        if settings.port and settings.host:
+            self.__client = ComponentXMPP(
+                jid=settings.jid,
+                secret=settings.secret,
+                host=settings.host,
+                port=settings.port,
+            )
+        else:
+            self.__client = ClientXMPP(
+                jid=settings.jid,
+                password=settings.secret
+            )
         super().__init__(
-            jid=jid,
-            password=password,
-            user_id=BRIDGE_DEAFAULT_ID,
-            user_name=BRIDGE_DEAFAULT_NAME
+            client=self.__client,
+            upload_domain=upload_domain,
+            user=Sender(name=BRIDGE_DEAFAULT_NAME, id=BRIDGE_DEAFAULT_ID)
         )
         self.__chat_service = chat_service
         self.__dispatcher = disptacher
@@ -64,25 +87,36 @@ class XmppClient(XmppActor, ChatHandlerFactory):
         self.__command_handler = command_handler
         self.__message_storage = message_storage
         self.__actor_factory = XmppActorFactory(
-            jid=jid,
-            password=password,
             pool_size_limit=actors_pool_size_limit,
-            fallback=self
+            listener=self,
+            upload_domain=upload_domain,
         )
         self.__logger = logging.getLogger(self.__class__.__name__)
-        self.add_event_handler("groupchat_direct_invite", self.__invite_callback)
-        self.add_event_handler("message", self.__process_user_command)
-        self.add_event_handler("groupchat_message", self.__process_muc_message)
+        self.__client.add_event_handler("groupchat_direct_invite", self.__invite_callback)
+        self.__client.add_event_handler("message", self.__process_user_command)
+        self.__client.add_event_handler("groupchat_message", self.__process_muc_message)
 
+    @override
+    def get_from_value(self) -> JID | None:
+        if self.__client.is_component:
+            return JID(f"{BRIDGE_DEAFAULT_ID}@{self.__client.boundjid.bare}")
+
+        return None
+
+    @override
     def realm(self):
         return Realm.XMPP
 
+    @override
+    def client(self) -> ClientXMPP | ComponentXMPP:
+        return self.__client
+
+    @override
     async def create_handler(
         self,
         address: str,
     ) -> ChatHandler | None:
         handler = XmppRoomHandler(
-            main_actor=self,
             chat=Chat(address=address, realm=Realm.XMPP),
             sticker_cache=self.__sticker_cache,
             message_storage=self.__message_storage,
@@ -94,6 +128,7 @@ class XmppClient(XmppActor, ChatHandlerFactory):
 
         return None
 
+    @override
     async def _session_start(self, _):
         _ = await super()._session_start(_)
 
@@ -110,7 +145,6 @@ class XmppClient(XmppActor, ChatHandlerFactory):
     async def __process_user_command(self, message):
         if message['type'] != 'chat':
             return
-
 
         command: str = message['body']
         sender: str = message['from'].bare
@@ -131,17 +165,24 @@ class XmppClient(XmppActor, ChatHandlerFactory):
         muc: str = message['mucroom']
         body: str = message['body'].strip()
 
+        user_id = self.get_from_value()
+        if user_id and message.get('to') != user_id:
+            return
+
         if body.startswith("!jabagram"):
-            jid = self.plugin['xep_0045'].get_jid_property(
-                muc,
-                sender,
-                'jid'
+            jid = self.get_jid(
+                room=JID(muc),
+                nick=sender,
             )
 
             if not jid:
-                message.reply(
-                    _("Bridge can’t get your JID to verify permissions. "
-                      "Please make bridge chat admin so that it can see other users' JIDs.")
+                self.make_message(
+                    mto=muc,
+                    mtype="groupchat",
+                    mbody=_(
+                      "Bridge can’t get your JID to verify permissions. "
+                      "Please make bridge chat admin so that it can see other users' JIDs."
+                    )
                 ).send()
                 return
 
@@ -150,7 +191,11 @@ class XmppClient(XmppActor, ChatHandlerFactory):
                 command=body,
                 user=jid.bare,
             ))
-            message.reply(response).send()
+            self.make_message(
+                mto=muc,
+                mtype="groupchat",
+                mbody=response
+            ).send()
             return
 
         if not self.__dispatcher.is_paired(muc):
