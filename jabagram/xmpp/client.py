@@ -39,7 +39,7 @@ from jabagram.model import (
     Sender,
     Message,
 )
-from jabagram.xmpp.actor import XmppActorFactory, XmppActor
+from jabagram.xmpp.actor import XmppActorFactory, XmppActor, XmppReconnectableActor
 from jabagram.xmpp.handler import XmppRoomHandler
 
 BRIDGE_DEAFAULT_ID = "listener"
@@ -52,7 +52,7 @@ class XmppConnectionSettings():
     host: str | None
     port: int | None
 
-class XmppListener(XmppActor, ChatHandlerFactory):
+class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
     def __init__(
         self,
         settings: XmppConnectionSettings,
@@ -78,7 +78,6 @@ class XmppListener(XmppActor, ChatHandlerFactory):
             )
         super().__init__(
             client=self.__client,
-            upload_domain=upload_domain,
             user=Sender(
                 name=BRIDGE_DEAFAULT_NAME,
                 id=BRIDGE_DEAFAULT_ID,

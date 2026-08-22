@@ -66,7 +66,7 @@ class XmppActor(ABC):
         )
         self.__id = user.id
         self.__name = self.__validate_name(user.name) + " (Telegram)"
-        self.__rooms: list[str] = []
+        self._rooms: list[str] = []
         self.__upload_domain = upload_domain
 
         for xep in ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
@@ -74,38 +74,16 @@ class XmppActor(ABC):
             self.__client.register_plugin(xep)
 
         self.__start_event = asyncio.Event()
-        self._reconnecting = None
-        self.__client.add_event_handler("session_start", self._session_start)
         self.__client.add_event_handler("groupchat_message_error", self.__process_errors)
-        self.__client.add_event_handler("disconnected", self.__on_connection_reset)
+        self.__client.add_event_handler("session_start", self._session_start)
         self.__client.add_event_handler("connected", self.__on_connected)
 
     async def _session_start(self, _):
         self.__client.send_presence(pfrom=self.get_from_value())
         self.__start_event.set()
 
-        if self._reconnecting:
-            self.__logger.info("Trying to rejoining to rooms...")
-            for room in self.__rooms:
-                await self.join(room)
-
     async def __on_connected(self, _):
         self.__logger.info("Successfully connected.")
-
-    async def __on_connection_reset(self, event):
-        if self._reconnecting is False:
-            return
-
-        self._reconnecting = True
-        self.__logger.warning(
-            "Connection reset: %s. Attempting to reconnect...",
-            event
-        )
-
-        # Wait for synchronous handlers
-        await asyncio.sleep(5)
-
-        self.__client.connect()
 
     async def upload_file(
         self,
@@ -117,7 +95,7 @@ class XmppActor(ABC):
         xep_0363 = self.__client.plugin['xep_0363']
 
         info_iq = await xep_0363.find_upload_service(
-            domain=self.__upload_domain
+            domain=JID(self.__upload_domain)
         )
 
         if info_iq is None:
@@ -193,9 +171,6 @@ class XmppActor(ABC):
             _ = await self.join(room)
 
     async def join(self, muc: str) -> bool:
-        if muc in self.__rooms and not self._reconnecting:
-            return True
-
         self.__logger.info(
             "Trying to join %s room...", muc
         )
@@ -228,25 +203,25 @@ class XmppActor(ABC):
         self.__logger.info(
             "Successfully joined to the room %s", muc
         )
-        if muc not in self.__rooms:
-            self.__rooms.append(muc)
+
+        if muc not in self._rooms:
+            self._rooms.append(muc)
+
         return True
 
     def leave(self, muc: str):
-        if muc in self.__rooms:
+        if muc in self._rooms:
             self.__client.plugin['xep_0045'].leave_muc(
                 room=JID(muc),
                 nick=self.__name,
                 pfrom=self.get_from_value()
             )
-            self.__rooms.remove(muc)
+            self._rooms.remove(muc)
 
     async def start(self):
-        self.__client.connect()
         await asyncio.wait_for(self.__start_event.wait(), 15)
 
     async def destroy(self):
-        self._reconnecting = False
         self.__client.disconnect()
 
     def make_message(self, *args, **kwargs) -> Message:
@@ -281,7 +256,68 @@ class XmppActor(ABC):
 
         return "".join(valid)
 
-class XmppUserActor(XmppActor):
+class XmppReconnectableActor(XmppActor, ABC):
+    def __init__(
+        self,
+        user: Sender,
+        client: BaseXMPP
+    ):
+        super().__init__(
+            client=client,
+            user=user,
+            upload_domain=None
+        )
+        self._reconnecting: None | bool = None
+        self.__client = client
+        self.__logger = logging.getLogger(
+            f"{__class__.__name__}/{user.id}"
+        )
+        self.__client.add_event_handler("disconnected", self.__on_connection_reset)
+
+    @override
+    async def join(self, muc: str) -> bool:
+        if muc in self._rooms and not self._reconnecting:
+            return True
+
+        return await super().join(muc)
+
+    @override
+    async def _session_start(self, _):
+        await super()._session_start(_)
+
+        if self._reconnecting:
+            self.__logger.info("Trying to rejoining to rooms...")
+            for room in self._rooms:
+                await self.join(room)
+
+
+    @override
+    async def start(self):
+        self.__client.connect()
+        await super().start()
+
+    @override
+    async def destroy(self):
+        self._reconnecting = False
+        await super().destroy()
+
+    async def __on_connection_reset(self, event):
+        if self._reconnecting is False:
+            return
+
+        self._reconnecting = True
+        self.__logger.warning(
+            "Connection reset: %s. Attempting to reconnect...",
+            event
+        )
+
+        # Wait for synchronous handlers
+        await asyncio.sleep(5)
+
+        self.__client.connect()
+
+
+class XmppUserActor(XmppReconnectableActor):
     def __init__(
         self,
         jid: str,
@@ -295,7 +331,6 @@ class XmppUserActor(XmppActor):
         super().__init__(
             client=client,
             user=user,
-            upload_domain=None
         )
 
     @override
@@ -303,7 +338,7 @@ class XmppUserActor(XmppActor):
         return None
 
     @override
-    def client(self) -> ClientXMPP:
+    def client(self) -> BaseXMPP:
         return self.__client
 
 class XmppComponentActor(XmppActor):
