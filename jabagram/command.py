@@ -93,7 +93,8 @@ class UserCommandHandler():
             if len(parts) < 3:
                 return _(
                     "Please specify the another gateway with which "
-                    "you want to pair this Telegram chat, it can be: xmpp"
+                    "you want to pair this Telegram chat, it can be: telegram, "
+                    "matrix, xmpp"
                 )
 
             target = parts[2]
@@ -105,6 +106,7 @@ class UserCommandHandler():
                 )
 
             target_address = parts[3]
+            target_realm = None
 
             if target == "xmpp":
                 target_realm = Realm.XMPP
@@ -116,10 +118,20 @@ class UserCommandHandler():
                         "You have specified an incorrect room JID. "
                         "Please try again."
                     )
-            else:
+            elif target == "matrix":
+                target_realm = Realm.MATRIX
+            elif target == "telegram":
+                target_realm = Realm.TELEGRAM
+
+            if not target_realm:
                 return _(
                     "You have specified an incorrect target gateway. "
                     "Please try again."
+                )
+
+            if target_realm == source_chat.realm:
+                return _(
+                    "You can not pair chat with the same gateway."
                 )
 
             target_chat = Chat(

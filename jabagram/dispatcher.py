@@ -88,22 +88,21 @@ class MessageDispatcher():
         """Put event inside event queue"""
         await self.__event_queue.put(forwardable)
 
-    def add_handler(self, address: str, handler: ChatHandler):
-        """Add chat handlers that recieves events from address"""
-        handlers = self.get_handlers(address)
-
-        if not handlers:
-            handlers = []
-            self.__chat_map[address] = handlers
-
-        handlers.append(handler)
+    def set_handlers(self, address: str, handlers: list[ChatHandler]):
+        """Set chat handlers that recieves events from address"""
+        self.__chat_map[address] = handlers
 
     def get_handlers(
         self,
         address: str
-    ) -> list[ChatHandler] | None:
+    ) -> list[ChatHandler]:
         """Get handlers for the chat"""
-        return self.__chat_map.get(address)
+        handlers = self.__chat_map.get(address)
+        if not handlers:
+            handlers = []
+            self.__chat_map[address] = handlers
+
+        return handlers
 
     def is_paired(self, chat: str) -> bool:
         """Check if the chat is inside the chat handlers map"""

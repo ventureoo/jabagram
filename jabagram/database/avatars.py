@@ -27,28 +27,28 @@ class AvatarCache(SqliteTable):
         if self._execute(
             statement=(
                 "CREATE TABLE IF NOT EXISTS "
-                "avatars(user_id TEXT PRIMARY KEY, data BLOB NOT NULL)"
+                "avatars(user_id TEXT PRIMARY KEY, url TEXT NOT NULL)"
             )
         ) is None:
             return False
 
         return True
 
-    def add(self, user_id: str, data: bytes) -> None:
+    def add(self, user_id: str, url: str) -> None:
         self._execute(
             user_id,
-            data,
+            url,
             statement=(
-                "INSERT INTO avatars(user_id, data) VALUES (?, ?) ON "
-                "CONFLICT (user_id) DO UPDATE SET data = excluded.data"
+                "INSERT INTO avatars(user_id, url) VALUES (?, ?) ON "
+                "CONFLICT (user_id) DO UPDATE SET url = excluded.url"
             ),
             on_error_message="Failed to add avatar"
         )
 
-    def get(self, user_id: str) -> bytes | None:
+    def get(self, user_id: str) -> str | None:
         avatars: list[tuple[bytes]] | None = self._execute(
             user_id,
-            statement="SELECT data FROM avatars WHERE user_id = ?",
+            statement="SELECT url FROM avatars WHERE user_id = ?",
             on_error_message="Failed to get avatar"
         )
 

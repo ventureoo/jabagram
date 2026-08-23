@@ -47,6 +47,7 @@ class XmppRoomHandler(ChatHandler):
         sticker_cache: StickerCache,
     ) -> None:
         super().__init__(chat)
+        self.__chat = chat
         self.__actor_factory = actor_factory
         self.__muc = JID(chat.address)
         self.__message_storage = message_storage
@@ -58,8 +59,8 @@ class XmppRoomHandler(ChatHandler):
 
         mbody = origin.text
 
-        if origin.reply:
-            reply_body = "> " + origin.reply.replace("\n", "\n> ")
+        if origin.reply and origin.reply.body:
+            reply_body = "> " + origin.reply.body.replace("\n", "\n> ")
             mbody = f"{reply_body}\n{origin.text}"
 
         actor = await self.__actor_factory.get_actor(
@@ -78,8 +79,8 @@ class XmppRoomHandler(ChatHandler):
         message.send()
 
         self.__message_storage.add(
-            source=origin.chat.address,
-            target=str(self.__muc),
+            source=origin.chat,
+            target=self.__chat,
             target_message_id=message['id'],
             source_message_id=origin.id,
             body=origin.text,
@@ -116,6 +117,13 @@ class XmppRoomHandler(ChatHandler):
         if not url:
             url = await attachment.url_callback()
 
+            if not url:
+                self.__logger.error(
+                    "Failed to get URL for: %s",
+                    attachment
+                )
+                return
+
         actor = await self.__actor_factory.get_actor(
             user=Sender(
                 id=attachment.sender.id,
@@ -134,6 +142,14 @@ class XmppRoomHandler(ChatHandler):
                         content_type=attachment.mime or resp.content_type,
                         input_file=resp.content # type: ignore
                     )
+
+                    if not url:
+                        self.__logger.error(
+                            "Failed to upload attachment: %s",
+                            attachment
+                        )
+                        return
+
                     if isinstance(attachment, Sticker) and url:
                         self.__sticker_cache.add(
                             attachment.file_id, url
@@ -152,8 +168,8 @@ class XmppRoomHandler(ChatHandler):
         if attachment.text:
             body = f"{attachment.text}\n{body}"
 
-        if attachment.reply:
-            reply = "> " + attachment.reply.replace("\n", "\n> ")
+        if attachment.reply and attachment.reply.body:
+            reply = "> " + attachment.reply.body.replace("\n", "\n> ")
             body = f"{reply}\n{body}"
 
         message = actor.make_message(
@@ -162,16 +178,18 @@ class XmppRoomHandler(ChatHandler):
             mtype='groupchat',
         )
         message['oob']['url'] = url
+        self.__logger.info("Attachment message: %s", message)
         message.send()
 
-        self.__message_storage.add(
-            source=attachment.chat.address,
-            target=str(self.__muc),
-            target_message_id=message['id'],
-            source_message_id=attachment.id,
-            body=body,
-            topic_id=attachment.chat.topic_id
-        )
+        if body:
+            self.__message_storage.add(
+                source=attachment.chat,
+                target=self.__chat,
+                target_message_id=message['id'],
+                source_message_id=attachment.id,
+                body=body,
+                topic_id=attachment.chat.topic_id
+            )
 
     async def edit_message(self, edited: Message) -> None:
         result = self.__message_storage.get_by_id(
@@ -198,8 +216,8 @@ class XmppRoomHandler(ChatHandler):
             muc=str(self.__muc)
         )
 
-        if edited.reply:
-            reply_body = "> " + edited.reply.replace("\n", "\n> ")
+        if edited.reply and edited.reply.body:
+            reply_body = "> " + edited.reply.body.replace("\n", "\n> ")
             mbody = f"{reply_body}\n{mbody}"
 
         message = actor.make_message(

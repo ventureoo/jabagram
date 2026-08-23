@@ -17,19 +17,25 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 from abc import ABC, abstractmethod
+from collections.abc import Coroutine
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, override
 
 class Realm(Enum):
     TELEGRAM = 1
     XMPP = 2
+    MATRIX = 3
 
 @dataclass(kw_only=True, frozen=True)
 class Chat():
     address: str
     realm: Realm
     topic_id: int | None = None
+
+    @override
+    def __hash__(self):
+        return hash(self.address)
 
 @dataclass(kw_only=True)
 class Forwardable():
@@ -43,7 +49,7 @@ class UnbridgeEvent(Forwardable):
 class Sender():
     name: str
     id: str
-    avatar_callback: Callable | None
+    avatar_callback: Callable[[], Coroutine[None, None, str | None]] | None = field(repr=False)
 
 @dataclass(kw_only=True)
 class Event(Forwardable):
@@ -51,16 +57,21 @@ class Event(Forwardable):
     text: str = field(repr=False)
 
 @dataclass(kw_only=True)
+class Reply():
+    id: str | None
+    body: str | None
+
+@dataclass(kw_only=True)
 class Message(Event):
     sender: Sender
-    reply: str | None = field(repr=False, default=None)
+    reply: Reply | None = field(repr=False, default=None)
     edit: bool | None = False
 
 @dataclass(kw_only=True)
 class Attachment(Message):
-    url_callback: Callable = field(repr=False)
+    url_callback: Callable[[], Coroutine[None, None, str | None]] = field(repr=False)
     fname: str | None = None
-    mime: str | None = None
+    mime: str | None = "application/octet-stream"
     fsize: int | None = None
 
 @dataclass(kw_only=True)

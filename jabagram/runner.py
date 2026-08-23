@@ -32,8 +32,8 @@ from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
 from jabagram.service import ChatService
 from jabagram.telegram.client import TelegramClient
+from jabagram.matrix.client import MatrixClient
 from jabagram.xmpp.client import XmppListener, XmppConnectionSettings
-from os import path
 
 CONFIG_FILE_NOT_FOUND = """
 Configuration file not found.
@@ -66,10 +66,6 @@ def main():
 
     gettext.bindtextdomain("jabagram", args.locales)
     gettext.textdomain("jabagram")
-
-    is_container = any([
-        path.exists(env) for env in ("/.dockerenv", "/run/.containerenv")
-    ])
 
     logging.basicConfig(
         filename=None,
@@ -145,15 +141,17 @@ def main():
         except ValueError:
             pass
 
+        server = config.get("matrix", "server")
+        user = config.get("matrix", "user")
+        password = config.get("matrix", "password")
+
         telegram = TelegramClient(
             token=config.get("telegram", "token"),
-            jid=config.get("xmpp", "login"),
             chat_service=chat_service,
             dispatcher=dispatcher,
             command_handler=command_handler,
             message_storage=message_storage,
             topic_name_cache=topic_name_cache,
-            avatar_cache=avatar_cache,
         )
         xmpp = XmppListener(
             settings=XmppConnectionSettings(
@@ -170,16 +168,37 @@ def main():
             actors_pool_size_limit=actors_pool_size_limit,
             upload_domain=upload_domain,
         )
+        matrix = MatrixClient(
+            server=server,
+            user=user,
+            password=password,
+            dispatcher=dispatcher,
+            chat_service=chat_service,
+            command_handler=command_handler,
+            message_storage=message_storage,
+            avatar_cache=avatar_cache,
+        )
         loop.create_task(telegram.start())
+        loop.create_task(matrix.start())
         loop.create_task(xmpp.start())
+
+        async def wait_for_start():
+            await telegram.wait_for_start()
+            await matrix.wait_for_start()
+            await xmpp.wait_for_start()
+            await chat_service.load_chats()
+
+        loop.run_until_complete(wait_for_start())
         loop.create_task(dispatcher.start())
         loop.run_forever()
     except KeyboardInterrupt:
         logger.info("SIGTERM received, exit...")
     except FileNotFoundError:
         logger.error(CONFIG_FILE_NOT_FOUND)
-    except configparser.NoOptionError:
-        logger.exception("Missing mandatory option")
+    except configparser.NoOptionError as error:
+        logger.error("Missing mandatory option: %s", error)
+    except configparser.NoSectionError as error:
+        logger.error("Missing mandatory section: %s", error)
     except configparser.Error:
         logger.exception("Config parsing error")
 

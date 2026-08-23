@@ -33,13 +33,14 @@ from jabagram.service import ChatService
 from jabagram.model import (
     Attachment,
     Chat,
+    Reply,
     Realm,
     ChatHandler,
     ChatHandlerFactory,
     Sender,
     Message,
 )
-from jabagram.xmpp.actor import XmppActorFactory, XmppActor, XmppReconnectableActor
+from jabagram.xmpp.actor import XmppActorFactory, XmppReconnectableActor
 from jabagram.xmpp.handler import XmppRoomHandler
 
 BRIDGE_DEAFAULT_ID = "listener"
@@ -119,6 +120,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
         self,
         address: str,
     ) -> ChatHandler | None:
+        self.__logger.info("Creating new handler for %s", address)
         handler = XmppRoomHandler(
             chat=Chat(address=address, realm=Realm.XMPP),
             sticker_cache=self.__sticker_cache,
@@ -137,7 +139,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
 
         if not self._reconnecting:
             self.__chat_service.register_factory(Realm.XMPP, self)
-            await self.__chat_service.load_chats()
+            self._start_event.set()
 
     async def __invite_callback(self, invite):
         muc = str(invite['groupchat_invite']['jid'])
@@ -162,6 +164,10 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
         )
         message.reply(response).send()
 
+    async def wait_for_start(self):
+        await self._start_event.wait()
+
+
     async def __process_muc_message(self, message):
         sender: str = message['mucnick']
         message_id: str = message['id']
@@ -172,11 +178,12 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
         if user_id and message.get('to') != user_id:
             return
 
+        jid = self.get_jid(
+            room=JID(muc),
+            nick=sender,
+        )
+
         if body.startswith("!jabagram"):
-            jid = self.get_jid(
-                room=JID(muc),
-                nick=sender,
-            )
 
             if not jid:
                 self.make_message(
@@ -204,8 +211,10 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
         if not self.__dispatcher.is_paired(muc):
             return
 
-        if sender.endswith("(Telegram)") or sender == BRIDGE_DEAFAULT_NAME:
+        if sender.endswith("(Telegram)") or sender.endswith("(Matrix)") or sender == BRIDGE_DEAFAULT_NAME:
             return
+
+        sender = sender + " (XMPP)"
 
         if message['oob']['url']:
             url = message['oob']['url']
@@ -223,11 +232,15 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
             attachment = Attachment(
                 id=message_id,
                 chat=Chat(realm=Realm.XMPP, address=str(muc)),
-                sender=Sender(name=sender, id="", avatar_callback=None),
+                sender=Sender(
+                    name=sender,
+                    id=str(jid),
+                    avatar_callback=None,
+                ),
                 url_callback=url_callback,
                 fname=fname,
-                text=caption if caption else "",
                 mime=None,
+                text=caption if caption else "",
                 fsize=None,
             )
             await self.__dispatcher.send(attachment)
@@ -243,9 +256,16 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
             message = Message(
                 id=message_id,
                 chat=Chat(realm=Realm.XMPP, address=muc),
-                sender=Sender(name=sender, id="", avatar_callback=None),
+                sender=Sender(
+                    name=sender,
+                    id=str(jid),
+                    avatar_callback=None
+                ),
                 text=text if reply and text else body,
-                reply=reply,
+                reply=Reply(
+                    id=None,
+                    body=reply,
+                ) if reply else None,
                 edit=is_edit
             )
             await self.__dispatcher.send(message)

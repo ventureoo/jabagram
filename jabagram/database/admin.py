@@ -34,7 +34,7 @@ class AdminStorage(SqliteTable):
         if self._execute(
             statement=(
                 "CREATE TABLE IF NOT EXISTS admins"
-                "(realm INTEGER NOT NULL CHECK ( realm IN (1, 2) ),"
+                "(realm INTEGER NOT NULL CHECK ( realm IN (1, 2, 3) ),"
                 "user_id TEXT NOT NULL)"
             )
         ) is None:

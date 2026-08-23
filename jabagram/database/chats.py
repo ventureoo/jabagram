@@ -27,8 +27,8 @@ class ChatStorage(SqliteTable):
             statement=(
                 "CREATE TABLE IF NOT EXISTS chats"
                 "(source TEXT NOT NULL, target TEXT NOT NULL,"
-                "source_realm INTEGER NOT NULL CHECK ( source_realm IN (1, 2) ),"
-                "target_realm INTEGER NOT NULL CHECK ( target_realm IN (1, 2) ))"
+                "source_realm INTEGER NOT NULL CHECK ( source_realm IN (1, 2, 3) ),"
+                "target_realm INTEGER NOT NULL CHECK ( target_realm IN (1, 2, 3) ))"
             )
         ) is None:
             return False

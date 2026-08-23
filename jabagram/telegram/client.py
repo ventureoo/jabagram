@@ -16,6 +16,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+import asyncio
 import aiohttp
 import logging
 import mimetypes
@@ -23,7 +24,6 @@ import mimetypes
 from gettext import gettext as _
 from typing import Any, override
 from jabagram.command import UserCommandHandler
-from jabagram.database.avatars import AvatarCache
 from jabagram.database.messages import MessageStorage
 from jabagram.database.topics import TopicNameCache
 from jabagram.dispatcher import MessageDispatcher
@@ -32,6 +32,7 @@ from jabagram.model import (
     Attachment,
     Realm,
     Chat,
+    Reply,
     ChatHandler,
     ChatHandlerFactory,
     Sender,
@@ -47,23 +48,20 @@ class TelegramClient(ChatHandlerFactory):
     def __init__(
         self,
         token: str,
-        jid: str,
         chat_service: ChatService,
         command_handler: UserCommandHandler,
         dispatcher: MessageDispatcher,
         topic_name_cache: TopicNameCache,
         message_storage: MessageStorage,
-        avatar_cache: AvatarCache,
     ) -> None:
         self.__api = TelegramApi(token)
         self.__token = token
-        self.__jid = jid
         self.__disptacher = dispatcher
         self.__chat_service = chat_service
         self.__topic_name_cache = topic_name_cache
         self.__message_storage = message_storage
-        self.__avatar_cache = avatar_cache
         self.__command_handler = command_handler
+        self.__start_event = asyncio.Event()
         self.__logger = logging.getLogger(__class__.__name__)
 
     @override
@@ -75,12 +73,16 @@ class TelegramClient(ChatHandlerFactory):
         self,
         address: str,
     ) -> ChatHandler | None:
+        self.__logger.info("Creating new handler for %s", address)
         handler = TelegramChatHandler(
             chat=Chat(address=address, realm=Realm.TELEGRAM),
             api=self.__api,
             message_storage=self.__message_storage,
         )
         return handler
+
+    async def wait_for_start(self):
+        await self.__start_event.wait()
 
     async def start(self):
         params = {
@@ -89,6 +91,7 @@ class TelegramClient(ChatHandlerFactory):
         self.__logger.info("Starting to getting updates from Telegram...")
         self.__chat_service.register_factory(realm=Realm.TELEGRAM, factory=self)
 
+        self.__start_event.set()
         while True:
             updates = None
             try:
@@ -287,7 +290,7 @@ class TelegramClient(ChatHandlerFactory):
     def __get_reply(
         self,
         message: dict[Any, Any]
-    ) -> str | None:
+    ) -> tuple[str | None, str] | None:
         reply: dict[Any, Any] | None = message.get("reply_to_message")
         if not reply:
             return None
@@ -295,11 +298,12 @@ class TelegramClient(ChatHandlerFactory):
         sender, _ = self.__get_user(reply['from'])
         attachment = self.__extract_attachment(sender, reply)
         reply_body = reply.get("text") or reply.get("caption")
+        reply_id = str(reply.get("message_id"))
 
         if not reply_body and attachment:
             reply_body = attachment.fname
 
-        return reply_body
+        return reply_body, reply_id
 
     async def __process_message(
         self,
@@ -308,30 +312,29 @@ class TelegramClient(ChatHandlerFactory):
     ) -> None:
         chat_id = str(raw_message['chat']['id'])
         message_id = str(raw_message['message_id'])
-        sender, sender_id = self.__get_user(raw_message['from'])
+        sender, user_id = self.__get_user(raw_message['from'])
         text: str | None = raw_message.get("text")
         reply = self.__get_reply(raw_message)
+
+        reply_body = reply_id = None
+        if reply:
+            (reply_body, reply_id) = reply
+
         forward: dict[Any, Any] | None = raw_message.get('forward_origin')
         topic_id = raw_message.get("message_thread_id")
         topic_name = self.__extract_topic_name(raw_message)
 
+        sender_id = str(user_id)
         if topic_name:
             sender += " [" + topic_name + "]"
             sender_id += f"_{topic_id}"
 
+        sender += " (Telegram)"
+
         async def avatar_callback():
             try:
-                data = self.__avatar_cache.get(sender_id)
-
-                if data:
-                    self.__logger.info(
-                        "User %s avatar retrieved from cache",
-                        sender_id
-                    )
-                    return data
-
                 profile = await self.__api.getUserProfilePhotos(
-                    user_id=int(sender_id),
+                    user_id=user_id,
                     offset=0,
                     limit=1
                 )
@@ -349,13 +352,7 @@ class TelegramClient(ChatHandlerFactory):
                     f"https://api.telegram.org/file/bot"
                     f"{self.__token}/{file_path}"
                 )
-
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
-                        data = await response.read()
-
-                self.__avatar_cache.add(sender_id, data)
-                return data
+                return url
             except TelegramApiError as error:
                 self.__logger.error(
                     "Failed to get avatar of user: %s",
@@ -395,7 +392,10 @@ class TelegramClient(ChatHandlerFactory):
                         id=sender_id,
                         avatar_callback=avatar_callback
                     ),
-                    reply=reply,
+                    reply=Reply(
+                        id=reply_id,
+                        body=reply_body,
+                    ) if reply else None,
                     edit=edit,
                 )
             )
@@ -460,7 +460,10 @@ class TelegramClient(ChatHandlerFactory):
                         ),
                         # if we have text, reply should be nested
                         # in the message below
-                        reply=None if text else reply,
+                        reply=Reply(
+                            id=reply_id,
+                            body=reply_body,
+                        ) if reply and not text else None,
                         mime=attachment.mime,
                         fsize=attachment.fsize,
                         url_callback=url_callback,
@@ -491,7 +494,7 @@ class TelegramClient(ChatHandlerFactory):
         if user.get("last_name"):
             user_name = user_name + " " + user['last_name']
 
-        user_id = str(user['id'])
+        user_id = user['id']
 
         return user_name, user_id
 

@@ -25,7 +25,7 @@ from aiohttp import ClientConnectionError
 from datetime import datetime
 from gettext import gettext as _
 from jabagram.database.messages import MessageStorage
-from jabagram.model import Chat, ChatHandler, Event, Message, Attachment
+from jabagram.model import Chat, ChatHandler, Event, Message, Attachment, Realm
 from jabagram.telegram.api import TelegramApi, TelegramApiError
 
 # When an XMPP user replies to a message coming from a side topic, all of his
@@ -91,15 +91,26 @@ class TelegramChatHandler(ChatHandler):
         entry = self.__residence_map.get(origin.sender.name)
 
         if origin.reply:
-            result = self.__message_storage.get_by_body(
-                target=origin.chat.address,
-                source=self.__chat.address,
-                topic_id=None,
-                body=origin.reply,
-            )
+            result = None
+            if origin.reply.body:
+                result = self.__message_storage.get_by_body(
+                    target=self.__chat.address,
+                    target_realm=self.__chat.realm,
+                    topic_id=None,
+                    body=origin.reply.body,
+                )
+            elif origin.reply.id:
+                result = self.__message_storage.get_by_id(
+                    target=origin.chat.address,
+                    source=self.__chat.address,
+                    topic_id=None,
+                    message_id=origin.reply.id,
+                )
+
             if result:
+                reply_to_message_id = result.source_id if result.source_realm == Realm.TELEGRAM.value else result.target_id
                 params["text"] = f"{origin.sender.name}: {origin.text}"
-                params["reply_to_message_id"] = result.source_id
+                params["reply_to_message_id"] = reply_to_message_id
 
                 if result.topic_id:
                     params["message_thread_id"] = result.topic_id
@@ -108,20 +119,20 @@ class TelegramChatHandler(ChatHandler):
                     if entry:
                         del self.__residence_map[origin.sender.name]
                         entry = None
-            else:
+            elif origin.reply.body:
                 params["text"] = (
-                    f"{origin.reply}\n"
+                    f"{origin.reply.body}\n"
                     f"{origin.sender.name}: {origin.text}"
                 )
                 format = [
                     {
                         "type": "blockquote",
                         "offset": 0,
-                        "length": len(origin.reply)
+                        "length": len(origin.reply.body)
                     },
                     {
                         "type": "bold",
-                        "offset": len(origin.reply) + 1,
+                        "offset": len(origin.reply.body) + 1,
                         "length": len(origin.sender.name)
                     }
                 ]
@@ -137,8 +148,8 @@ class TelegramChatHandler(ChatHandler):
         try:
             response = await self.__api.sendMessage(**params)
             self.__message_storage.add(
-                target=self.__chat.address,
-                source=origin.chat.address,
+                target=self.__chat,
+                source=origin.chat,
                 source_message_id=origin.id,
                 target_message_id=response['message_id'],
                 body=origin.text,
@@ -152,6 +163,12 @@ class TelegramChatHandler(ChatHandler):
 
     async def send_attachment(self, attachment: Attachment) -> None:
         url = await attachment.url_callback()
+
+        if not url:
+            self.__logger.error(
+                "Failed to get URL for: %s", attachment
+            )
+            return
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -209,8 +226,8 @@ class TelegramChatHandler(ChatHandler):
                     try:
                         response = await method(form_data, **params)
                         self.__message_storage.add(
-                            target=self.__chat.address,
-                            source=attachment.chat.address,
+                            target=self.__chat,
+                            source=attachment.chat,
                             source_message_id=attachment.id,
                             target_message_id=response['message_id'],
                             body=f"{attachment.text}\n{url}" if attachment.text else url,
@@ -264,14 +281,25 @@ class TelegramChatHandler(ChatHandler):
 
         if edited.reply:
             # Be sure that replies to messages was sent as native in Telegram
-            if self.__message_storage.get_by_body(
-                target=edited.chat.address,
-                source=self.__chat.address,
-                topic_id=edited.chat.topic_id,
-                body=edited.reply
-            ):
+            result = None
+            if edited.reply.body:
+                result = self.__message_storage.get_by_body(
+                    target=self.__chat.address,
+                    target_realm=self.__chat.realm,
+                    topic_id=None,
+                    body=edited.reply.body,
+                )
+            elif edited.reply.id:
+                result = self.__message_storage.get_by_id(
+                    target=edited.chat.address,
+                    source=self.__chat.address,
+                    topic_id=None,
+                    message_id=edited.reply.id,
+                )
+
+            if result:
                 params["text"] = f"{edited.sender.name}: {edited.text}"
-            else:
+            elif edited.reply.body:
                 params["text"] = (
                     f"{edited.reply}\n"
                     f"{edited.sender.name}: {edited.text}"
@@ -280,11 +308,11 @@ class TelegramChatHandler(ChatHandler):
                     {
                         "type": "blockquote",
                         "offset": 0,
-                        "length": len(edited.reply)
+                        "length": len(edited.reply.body)
                     },
                     {
                         "type": "bold",
-                        "offset": len(edited.reply) + 1,
+                        "offset": len(edited.reply.body) + 1,
                         "length": len(edited.sender.name)
                     }
                 ]

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-16 18:06+0300\n"
+"POT-Creation-Date: 2026-08-23 23:32+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -37,7 +37,7 @@ msgstr ""
 msgid "You are successfully verified"
 msgstr ""
 
-#: jabagram/command.py:68 jabagram/command.py:167
+#: jabagram/command.py:68 jabagram/command.py:179
 msgid "Invalid subcommand specified"
 msgstr ""
 
@@ -48,34 +48,38 @@ msgstr ""
 #: jabagram/command.py:95
 msgid ""
 "Please specify the another gateway with which you want to pair this Telegram "
-"chat, it can be: xmpp"
+"chat, it can be: telegram, matrix, xmpp"
 msgstr ""
 
-#: jabagram/command.py:103
+#: jabagram/command.py:104
 msgid ""
 "Please specify the target address of room you want to pair with this "
 "Telegram chat."
 msgstr ""
 
-#: jabagram/command.py:116
+#: jabagram/command.py:118
 msgid "You have specified an incorrect room JID. Please try again."
 msgstr ""
 
-#: jabagram/command.py:121
+#: jabagram/command.py:128
 msgid "You have specified an incorrect target gateway. Please try again."
 msgstr ""
 
-#: jabagram/command.py:132
+#: jabagram/command.py:134
+msgid "You can not pair chat with the same gateway."
+msgstr ""
+
+#: jabagram/command.py:144
 msgid "This chat is already paired with specified room."
 msgstr ""
 
-#: jabagram/command.py:137
+#: jabagram/command.py:149
 msgid ""
 "Specified room has been already placed on the queue, so it can not be paired "
 "with this chat again\n"
 msgstr ""
 
-#: jabagram/command.py:142
+#: jabagram/command.py:154
 msgid ""
 "Specified room has been successfully placed on the queue. Please invite this "
 "bot to target chat.\n"
@@ -83,35 +87,39 @@ msgid ""
 "command with the corrected address."
 msgstr ""
 
-#: jabagram/command.py:150
+#: jabagram/command.py:162
 msgid "There are no pairing requests for this chat."
 msgstr ""
 
-#: jabagram/command.py:154
+#: jabagram/command.py:166
 msgid "This chat was successfully paired."
 msgstr ""
 
-#: jabagram/command.py:159
+#: jabagram/command.py:171
 msgid "This chat is not paired with any other chat."
 msgstr ""
 
-#: jabagram/command.py:164
+#: jabagram/command.py:176
 msgid "Chat has been successfully unpaired. You can kick this bot."
 msgstr ""
 
-#: jabagram/telegram/handler.py:312
+#: jabagram/matrix/handler.py:305
+msgid "This chat was automatically unbridged due to a bot kick or via command."
+msgstr ""
+
+#: jabagram/telegram/handler.py:340
 msgid ""
 "This chat was automatically unbridged due to a bot kick in XMPP.\n"
 "If you want to bridge it again, invite this bot to this chat again and use "
 "the /jabagram command."
 msgstr ""
 
-#: jabagram/xmpp/client.py:143
+#: jabagram/xmpp/client.py:192
 msgid ""
 "Bridge can’t get your JID to verify permissions. Please make bridge chat "
 "admin so that it can see other users' JIDs."
 msgstr ""
 
-#: jabagram/xmpp/handler.py:212
+#: jabagram/xmpp/handler.py:253
 msgid "This chat was automatically unbridged due to a bot kick in Telegram."
 msgstr ""

@@ -65,7 +65,7 @@ class XmppActor(ABC):
             f"{__class__.__name__}/{user.id}"
         )
         self.__id = user.id
-        self.__name = self.__validate_name(user.name) + " (Telegram)"
+        self.__name = self.__validate_name(user.name)
         self._rooms: list[str] = []
         self.__upload_domain = upload_domain
 
@@ -73,14 +73,14 @@ class XmppActor(ABC):
                     'xep_0308', 'xep_0045', 'xep_0066', 'xep_0199'):
             self.__client.register_plugin(xep)
 
-        self.__start_event = asyncio.Event()
+        self._start_event = asyncio.Event()
         self.__client.add_event_handler("groupchat_message_error", self.__process_errors)
         self.__client.add_event_handler("session_start", self._session_start)
         self.__client.add_event_handler("connected", self.__on_connected)
 
     async def _session_start(self, _):
         self.__client.send_presence(pfrom=self.get_from_value())
-        self.__start_event.set()
+        self._start_event.set()
 
     async def __on_connected(self, _):
         self.__logger.info("Successfully connected.")
@@ -91,14 +91,17 @@ class XmppActor(ABC):
         size: int,
         content_type: str | None = None,
         input_file: IO[bytes] | None = None
-    ):
+    ) -> str | None:
         xep_0363 = self.__client.plugin['xep_0363']
 
         info_iq = await xep_0363.find_upload_service(
-            domain=JID(self.__upload_domain)
+            domain=JID(self.__upload_domain) if self.__upload_domain else None
         )
 
         if info_iq is None:
+            self.__logger.error(
+                "Failed to get upload domain"
+            )
             return None
 
         service = info_iq['from']
@@ -219,7 +222,7 @@ class XmppActor(ABC):
             self._rooms.remove(muc)
 
     async def start(self):
-        await asyncio.wait_for(self.__start_event.wait(), 15)
+        await asyncio.wait_for(self._start_event.wait(), 15)
 
     async def destroy(self):
         self.__client.disconnect()

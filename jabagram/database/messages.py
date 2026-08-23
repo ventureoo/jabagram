@@ -19,12 +19,15 @@ import logging
 import hashlib
 
 from typing import NamedTuple
+from jabagram.model import Chat, Realm
 from jabagram.database.base import SqliteTable
 
 class MessageIdEntry(NamedTuple):
     source_id: str
     target_id: str
     topic_id: int | None
+    source_realm: int
+    target_realm: int
 
 class MessageStorage(SqliteTable):
     def __init__(self, path: str):
@@ -35,9 +38,10 @@ class MessageStorage(SqliteTable):
         if self._execute(
             statement=(
                 "CREATE TABLE IF NOT EXISTS messages"
-                "(source_message_id TEXT UNIQUE NOT NULL, target_message_id TEXT UNIQUE NOT NULL,"
+                "(source_message_id TEXT NOT NULL, target_message_id TEXT NOT NULL,"
                 "body TEXT, source TEXT NOT NULL, topic_id INTEGER,"
-                "target TEXT NOT NULL)"
+                "target TEXT NOT NULL, source_realm INTEGER NOT NULL,"
+                "target_realm INTEGER NOT NULL)"
             )
         ) is None:
             return False
@@ -45,8 +49,8 @@ class MessageStorage(SqliteTable):
         return True
 
     def add(self,
-        source: str,
-        target: str,
+        source: Chat,
+        target: Chat,
         source_message_id: str,
         target_message_id: str,
         topic_id: int | None,
@@ -57,12 +61,15 @@ class MessageStorage(SqliteTable):
             source_message_id,
             target_message_id,
             digest,
-            source,
+            source.address,
             topic_id,
-            target,
+            target.address,
+            source.realm.value,
+            target.realm.value,
             statement=(
                 "INSERT INTO messages(source_message_id, target_message_id,"
-                "body, source, topic_id, target) VALUES (?, ?, ?, ?, ?, ?)"
+                "body, source, topic_id, target, source_realm, target_realm)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             ),
             on_error_message="Failed to insert message in table"
         )
@@ -75,11 +82,13 @@ class MessageStorage(SqliteTable):
         message_id: str
     ) -> MessageIdEntry | None:
         statement = (
-            "SELECT source_message_id, target_message_id, topic_id FROM messages WHERE"
-            " source = ? AND target = ? AND (source_message_id = ? OR target_message_id = ?)"
+            "SELECT source_message_id, target_message_id, topic_id, source_realm, target_realm FROM messages WHERE"
+            " (source = ? OR source = ?) AND (target = ? OR target = ?) AND (source_message_id = ? OR target_message_id = ?)"
         )
 
         args = (
+            source,
+            target,
             source,
             target,
             message_id,
@@ -107,20 +116,22 @@ class MessageStorage(SqliteTable):
 
     def get_by_body(
         self,
-        source: str,
-        topic_id: int | None,
         target: str,
+        target_realm: Realm,
+        topic_id: int | None,
         body: str
     ) -> MessageIdEntry | None:
         statement = (
-            "SELECT source_message_id, target_message_id, topic_id FROM messages WHERE"
-            " source = ? AND target = ? AND body = ?"
+            "SELECT source_message_id, target_message_id, topic_id, source_realm, target_realm FROM messages WHERE"
+            " (source = ? OR target = ?) AND (target_realm = ? OR source_realm = ?) AND body = ?"
         )
         digest = hashlib.sha256(body.encode()).hexdigest()
 
         args = (
-            source,
             target,
+            target,
+            target_realm.value,
+            target_realm.value,
             digest,
         )
 
