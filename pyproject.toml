@@ -19,8 +19,8 @@ classifiers = [
 ]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools >= 61.0", "setuptools-gettext"]
+build-backend = "setuptools.build_meta"
 
 [project.scripts]
 jabagram = "jabagram.runner:main"
@@ -30,15 +30,8 @@ Homepage = "https://github.com/ventureoo/jabagram"
 Repository = "https://github.com/ventureoo/jabagram.git"
 "Bug Tracker" = "https://github.com/ventureoo/jabagram/issues"
 
-[tool.poetry.dependencies]
-slixmpp = { version = "^1.17" }
+[tool.setuptools]
+packages = ["jabagram"]
 
-[tool.poetry]
-include = [
-    { path = "locales", format = ["sdist", "wheel"] }
-]
-
-[[tool.poetry.source]]
-name = "codeberg-slixmpp"
-url = "https://codeberg.org/api/packages/poezio/pypi/simple/"
-priority = "explicit"
+[tool.setuptools-gettext]
+source_dir = "locales"

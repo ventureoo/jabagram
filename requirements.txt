@@ -1,5 +1,5 @@
 aiohttp
 slixmpp >= 1.17
-matrix-nio
+matrix-nio >= 0.26.0
 Pillow
 unidecode

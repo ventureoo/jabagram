@@ -1,14 +1,17 @@
-FROM python:3-alpine AS builder
+FROM ghcr.io/astral-sh/uv:python3.14-alpine
 
-ENV PATH="/root/.local/bin:${PATH}"
-ENV PIPX_DEFAULT_PYTHON="/usr/local/bin/python3"
-RUN python3 -m pip install --user pipx && python3 -m pipx ensurepath
-RUN pipx install poetry && pipx inject poetry poetry-plugin-bundle
+ENV UV_PYTHON_DOWNLOADS=0
+ENV UV_LINK_MODE=copy
+
+COPY . /app
 WORKDIR /app
-COPY . ./
-RUN poetry bundle venv --python=/usr/local/bin/python3 --only=main /venv
 
-FROM python:3-alpine AS runner
-COPY --from=builder /venv /venv
-ENTRYPOINT ["/venv/bin/jabagram", "-c", "/data/config.ini", "-d", "/data/jabagram.db"]
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-editable
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-editable
+
+CMD ["uv", "run", "jabagram", "-c", "/data/config.ini", "-d", "/data/jabagram.db"]
 VOLUME [ "/data" ]
