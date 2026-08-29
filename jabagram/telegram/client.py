@@ -227,8 +227,8 @@ class TelegramClient(ChatHandlerFactory):
                     file_id=sticker['file_id'],
                     file_unique_id=sticker['file_unique_id'],
                     fsize=sticker.get("file_size"),
-                    mime="image/webm" if sticker.get(
-                        "is_video") else "video/webp"
+                    mime="video/webm" if sticker.get(
+                        "is_video") else "image/webp"
                 )
             case {"photo": [*_, photo]}:
                 return TelegramAttachment(
