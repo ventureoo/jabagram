@@ -236,8 +236,9 @@ class XmppActor(ABC):
     async def start(self):
         await asyncio.wait_for(self._start_event.wait(), 15)
 
+    @abstractmethod
     async def destroy(self):
-        self.__client.disconnect()
+        pass
 
     def make_message(self, *args, **kwargs) -> Message:
         kwargs["mfrom"] = self.get_from_value()
@@ -313,8 +314,8 @@ class XmppReconnectableActor(XmppActor, ABC):
 
     @override
     async def destroy(self):
+        self.__client.disconnect()
         self._reconnecting = False
-        await super().destroy()
 
     async def __on_connection_reset(self, event):
         if self._reconnecting is False:
@@ -425,6 +426,10 @@ class XmppComponentActor(XmppActor):
                 self.__user,
                 err
             )
+
+    @override
+    async def destroy(self):
+        pass
 
     @override
     def get_from_value(self) -> JID | None:
