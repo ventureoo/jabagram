@@ -55,6 +55,17 @@ BLACKLIST_USERNAME_CHARS = (
 RTL_CHAR_PATTERN = re.compile(r'[\u0590-\u05FF\u0600-\u06FF]')
 XMPP_OCCUPANT_ERROR = "Only occupants are allowed to send messages to the conference"
 
+XEPS = (
+    'xep_0030', # Service Discovery (Disco)
+    'xep_0045', # Multi-User Chat (MUC)
+    'xep_0066', # Out of Band Data
+    'xep_0071', # XHTML
+    'xep_0199', # XMPP Ping
+    'xep_0249', # Direct MUC Invitations
+    'xep_0308', # Last Message Correction
+    'xep_0363', # HTTP File Upload
+)
+
 class XmppActor(ABC):
     def __init__(
         self,
@@ -71,9 +82,7 @@ class XmppActor(ABC):
         self._rooms: list[str] = []
         self.__upload_domain = upload_domain
 
-        for xep in ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
-                    'xep_0308', 'xep_0045', 'xep_0066', 'xep_0199',
-                    'xep_0153'):
+        for xep in XEPS:
             self.__client.register_plugin(xep)
 
         self._start_event = asyncio.Event()
@@ -362,6 +371,7 @@ class XmppComponentActor(XmppActor):
         self.__user = user
         self.__client = client
         self.__logger = logging.getLogger(__class__.__name__)
+        self.__client.register_plugin('xep_0153') # vCard-Based Avatars
 
     async def __set_avatar(self):
         if not self.__user.avatar_callback:
