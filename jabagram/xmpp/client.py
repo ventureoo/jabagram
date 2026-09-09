@@ -251,7 +251,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
                 message_id: str = message['replace']['id']
                 is_edit = True
 
-            reply, text = self.__parse_reply(body)
+            reply, text = XmppListener.parse_reply(body)
 
             message = Message(
                 id=message_id,
@@ -270,7 +270,8 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
             )
             await self.__dispatcher.send(message)
 
-    def __parse_reply(self, message: str) -> tuple[str | None, str | None]:
+    @staticmethod
+    def parse_reply(message: str) -> tuple[str | None, str | None]:
         def _safe_get(line: str, index: int):
             try:
                 return line[index]
