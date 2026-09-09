@@ -441,6 +441,7 @@ class XmppActorFactory():
         self.__listener = listener
         self.__client = self.__listener.client()
         self.__jid = self.__client.boundjid
+        self.__locks: dict[str, asyncio.Lock] = {}
         self.__upload_domain = upload_domain
 
     async def get_actor(
@@ -456,39 +457,48 @@ class XmppActorFactory():
             actor = self.__actors_pool[user.id]
             return actor
 
-        self.__logger.info(
-            f"Trying to create actor with {self.__jid}/{user.id}"
-        )
+        lock = self.__locks.get(user.id)
+        if not lock:
+            lock = asyncio.Lock()
+            self.__locks[user.id] = lock
 
-        if isinstance(self.__client, ClientXMPP):
-            actor = XmppUserActor(
-                jid=self.__client.jid,
-                password=self.__client.password,
-                user=user,
+        async with lock:
+            self.__logger.info(
+                f"Trying to create actor with {self.__jid}/{user.id}"
             )
 
-            await actor.start()
+            if isinstance(self.__client, ClientXMPP):
+                actor = XmppUserActor(
+                    jid=self.__client.jid,
+                    password=self.__client.password,
+                    user=user,
+                )
 
-        elif isinstance(self.__client, ComponentXMPP):
-            actor = XmppComponentActor(
-                client=self.__client,
-                user=user,
-                upload_domain=self.__upload_domain,
-            )
-            await actor.start()
-        else:
-            return self.__listener
+                await actor.start()
 
-        if not (await actor.join(muc)):
-            await actor.destroy()
-            return self.__listener
+            elif isinstance(self.__client, ComponentXMPP):
+                actor = XmppComponentActor(
+                    client=self.__client,
+                    user=user,
+                    upload_domain=self.__upload_domain,
+                )
+                await actor.start()
+            else:
+                return self.__listener
 
-        self.__actors_pool[user.id] = actor
-        self.__actors_pool.move_to_end(user.id)
+            if not (await actor.join(muc)):
+                await actor.destroy()
+                return self.__listener
 
-        if len(self.__actors_pool) > self.__pool_size_limit:
-            (_, removed) = self.__actors_pool.popitem(last=False)
-            await removed.destroy()
+            self.__actors_pool[user.id] = actor
+            self.__actors_pool.move_to_end(user.id)
+
+
+            if len(self.__actors_pool) > self.__pool_size_limit:
+                (_, removed) = self.__actors_pool.popitem(last=False)
+                await removed.destroy()
+
+            del self.__locks[user.id]
 
         return actor
 
