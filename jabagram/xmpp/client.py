@@ -40,7 +40,7 @@ from jabagram.model import (
     Sender,
     Message,
 )
-from jabagram.xmpp.actor import XmppActorFactory, XmppReconnectableActor
+from jabagram.xmpp.actor import ConnectionState, XmppActorFactory, XmppReconnectableActor
 from jabagram.xmpp.handler import XmppRoomHandler
 
 BRIDGE_DEAFAULT_ID = "listener"
@@ -137,7 +137,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
     async def _session_start(self, _):
         _ = await super()._session_start(_)
 
-        if not self._reconnecting:
+        if self._state == ConnectionState.INITIAL_CONNECTION:
             self.__chat_service.register_factory(Realm.XMPP, self)
             self._start_event.set()
 

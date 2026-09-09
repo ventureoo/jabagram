@@ -23,6 +23,7 @@ import stringprep
 import aiohttp
 import hashlib
 
+from enum import Enum
 from abc import ABC, abstractmethod
 from aiohttp import ClientSession
 from collections import OrderedDict
@@ -65,6 +66,11 @@ XEPS = (
     'xep_0308', # Last Message Correction
     'xep_0363', # HTTP File Upload
 )
+
+class ConnectionState(Enum):
+    INITIAL_CONNECTION = 1
+    RECONNECTION = 2
+    DISCONNECTION = 3
 
 class XmppActor(ABC):
     def __init__(
@@ -283,7 +289,7 @@ class XmppReconnectableActor(XmppActor, ABC):
             user=user,
             upload_domain=None
         )
-        self._reconnecting: None | bool = None
+        self._state = ConnectionState.INITIAL_CONNECTION
         self.__client = client
         self.__logger = logging.getLogger(
             f"{__class__.__name__}/{user.id}"
@@ -292,7 +298,7 @@ class XmppReconnectableActor(XmppActor, ABC):
 
     @override
     async def join(self, muc: str) -> bool:
-        if muc in self._rooms and not self._reconnecting:
+        if muc in self._rooms and self._state != ConnectionState.RECONNECTION:
             return True
 
         return await super().join(muc)
@@ -301,7 +307,7 @@ class XmppReconnectableActor(XmppActor, ABC):
     async def _session_start(self, _):
         await super()._session_start(_)
 
-        if self._reconnecting:
+        if self._state == ConnectionState.RECONNECTION:
             self.__logger.info("Trying to rejoining to rooms...")
             for room in self._rooms:
                 await self.join(room)
@@ -315,13 +321,13 @@ class XmppReconnectableActor(XmppActor, ABC):
     @override
     async def destroy(self):
         self.__client.disconnect()
-        self._reconnecting = False
+        self._state = ConnectionState.DISCONNECTION
 
     async def __on_connection_reset(self, event):
-        if self._reconnecting is False:
+        if self._state == ConnectionState.DISCONNECTION:
             return
 
-        self._reconnecting = True
+        self._state = ConnectionState.RECONNECTION
         self.__logger.warning(
             "Connection reset: %s. Attempting to reconnect...",
             event
