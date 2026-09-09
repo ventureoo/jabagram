@@ -20,6 +20,8 @@ import asyncio
 import logging
 import re
 import stringprep
+import aiohttp
+import hashlib
 
 from abc import ABC, abstractmethod
 from aiohttp import ClientSession
@@ -29,7 +31,7 @@ from jabagram.model import Sender
 from pathlib import Path
 from slixmpp import ClientXMPP, JID, BaseXMPP
 from slixmpp.componentxmpp import ComponentXMPP
-from slixmpp.exceptions import PresenceError
+from slixmpp.exceptions import IqError, IqTimeout, PresenceError
 from slixmpp.stanza import Message
 from slixmpp.types import PresenceArgs
 from typing import IO, override
@@ -70,7 +72,8 @@ class XmppActor(ABC):
         self.__upload_domain = upload_domain
 
         for xep in ('xep_0030', 'xep_0249', 'xep_0071', 'xep_0363',
-                    'xep_0308', 'xep_0045', 'xep_0066', 'xep_0199'):
+                    'xep_0308', 'xep_0045', 'xep_0066', 'xep_0199',
+                    'xep_0153'):
             self.__client.register_plugin(xep)
 
         self._start_event = asyncio.Event()
@@ -358,6 +361,60 @@ class XmppComponentActor(XmppActor):
         )
         self.__user = user
         self.__client = client
+        self.__logger = logging.getLogger(__class__.__name__)
+
+    async def __set_avatar(self):
+        if not self.__user.avatar_callback:
+            return None
+
+        url: str | None = await self.__user.avatar_callback()
+
+        if not url:
+            return None
+
+        disco = self.__client.plugin["xep_0030"]
+        vcard_temp = self.__client.plugin["xep_0054"]
+        vcard_avatar = self.__client.plugin["xep_0153"]
+
+        avatar = None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status >= 400:
+                    self.__logger.error("Failed to download avatar: %s", response.status)
+                    return None
+
+                avatar = await response.read()
+
+        if not avatar:
+            self.__logger.error("Failed to get avatar")
+            return
+
+        hash = hashlib.sha1(avatar).hexdigest()
+        jid = self.get_from_value()
+
+        try:
+            vcard = vcard_temp.make_vcard()
+            vcard['PHOTO']['TYPE'] = "image/jpeg"
+            vcard['PHOTO']['BINVAL'] = avatar
+
+            await vcard_temp.publish_vcard(vcard=vcard, jid=jid)
+            await vcard_avatar.api["set_hash"](jid, args=hash)
+
+            disco.add_identity(
+                category='gateway',
+                itype='telegram',
+                name='jabagram'
+            )
+            disco.add_feature('http://jabber.org/protocol/disco#info')
+            disco.add_feature('vcard-temp')
+            disco.add_feature('jabber:iq:last')
+            self.__logger.info(f"Avatar set for {self.__user}")
+        except (IqError, IqTimeout) as err:
+            self.__logger.error(
+                "Failed to set avatar for %s: %s",
+                self.__user,
+                err
+            )
 
     @override
     def get_from_value(self) -> JID | None:
@@ -366,6 +423,10 @@ class XmppComponentActor(XmppActor):
     @override
     def client(self) -> ComponentXMPP:
         return self.__client
+
+    @override
+    async def start(self):
+        await self.__set_avatar()
 
 class XmppActorFactory():
     def __init__(
@@ -414,6 +475,7 @@ class XmppActorFactory():
                 user=user,
                 upload_domain=self.__upload_domain,
             )
+            await actor.start()
         else:
             return self.__listener
 
