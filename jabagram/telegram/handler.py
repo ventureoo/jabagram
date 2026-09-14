@@ -301,7 +301,7 @@ class TelegramChatHandler(ChatHandler):
                 params["text"] = f"{edited.sender.name}: {edited.text}"
             elif edited.reply.body:
                 params["text"] = (
-                    f"{edited.reply}\n"
+                    f"{edited.reply.body}\n"
                     f"{edited.sender.name}: {edited.text}"
                 )
                 format = [
