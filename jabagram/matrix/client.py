@@ -175,6 +175,7 @@ class MatrixClient(ChatHandlerFactory):
         relation = event.source.get('content', {}).get("m.relates_to", {})
         relation_id = relation.get("m.in_reply_to", relation).get("event_id", None)
         relation_type = relation.get("rel_type", "reply" if relation_id is not None else None)
+        is_reply = (relation_type == "reply" or relation_type == "m.thread")
 
         message = Message(
             id=relation_id if relation_type == "m.replace" else event.event_id,
@@ -185,7 +186,7 @@ class MatrixClient(ChatHandlerFactory):
                 avatar_callback=None
             ),
             text=event.body,
-            reply=Reply(id=relation_id, body=None) if relation_type == "reply" else None,
+            reply=Reply(id=relation_id, body=None) if is_reply else None,
             edit=(relation_type == "m.replace"),
         )
 
