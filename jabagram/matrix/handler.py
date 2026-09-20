@@ -289,6 +289,16 @@ class MatrixChatHandler(ChatHandler):
                 "Error when sending a message: %s",
                 response
             )
+            return
+
+        self.__message_storage.add(
+            target=self.__chat,
+            source=attachment.chat,
+            source_message_id=attachment.id,
+            target_message_id=response.event_id,
+            body=attachment.text,
+            topic_id=attachment.chat.topic_id
+        )
 
         response = await self.__client.room_send(
             self.__chat.address,
@@ -301,6 +311,17 @@ class MatrixChatHandler(ChatHandler):
                 "Error when sending a attachment: %s",
                 response
             )
+            return
+
+        self.__message_storage.add(
+            target=self.__chat,
+            source=attachment.chat,
+            source_message_id=attachment.id,
+            target_message_id=response.event_id,
+            body=attachment.text,
+            topic_id=attachment.chat.topic_id
+        )
+
 
 
     @override
