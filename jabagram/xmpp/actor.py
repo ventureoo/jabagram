@@ -22,6 +22,7 @@ import re
 import stringprep
 import aiohttp
 import hashlib
+import uuid
 
 from enum import Enum
 from abc import ABC, abstractmethod
@@ -64,7 +65,9 @@ XEPS = (
     'xep_0199', # XMPP Ping
     'xep_0249', # Direct MUC Invitations
     'xep_0308', # Last Message Correction
+    'xep_0359', # Unique and Stable Stanza IDs
     'xep_0363', # HTTP File Upload
+    'xep_0461', # Message Replies
 )
 
 class ConnectionState(Enum):
@@ -248,11 +251,15 @@ class XmppActor(ABC):
 
     def make_message(self, *args, **kwargs) -> Message:
         kwargs["mfrom"] = self.get_from_value()
-
         message = self.__client.make_message(
             *args,
             **kwargs,
         )
+
+        message["stanza_id"] = {}
+        message["stanza_id"]["id"] = str(uuid.uuid4())
+        message["stanza_id"]["by"] = kwargs['mto']
+
         return message
 
     @abstractmethod

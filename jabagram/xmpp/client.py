@@ -42,6 +42,7 @@ from jabagram.model import (
 )
 from jabagram.xmpp.actor import ConnectionState, XmppActorFactory, XmppReconnectableActor
 from jabagram.xmpp.handler import XmppRoomHandler
+from jabagram.xmpp.stanza import StanzaManager
 
 BRIDGE_DEAFAULT_ID = "listener"
 BRIDGE_DEAFAULT_NAME = "Telegram Bridge"
@@ -90,6 +91,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
         self.__sticker_cache = sticker_cache
         self.__command_handler = command_handler
         self.__message_storage = message_storage
+        self.__stanza_manager = StanzaManager()
         self.__actor_factory = XmppActorFactory(
             pool_size_limit=actors_pool_size_limit,
             listener=self,
@@ -125,6 +127,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
             chat=Chat(address=address, realm=Realm.XMPP),
             sticker_cache=self.__sticker_cache,
             message_storage=self.__message_storage,
+            stanza_manager=self.__stanza_manager,
             actor_factory=self.__actor_factory
         )
 
@@ -211,7 +214,14 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
         if not self.__dispatcher.is_paired(muc):
             return
 
+        if message['stanza_id']:
+            stanza_id = message['stanza_id']['id']
+        else:
+            stanza_id = None
+
         if sender.endswith("(Telegram)") or sender.endswith("(Matrix)") or sender == BRIDGE_DEAFAULT_NAME:
+            if stanza_id:
+                self.__stanza_manager.deliver(message_id, stanza_id)
             return
 
         sender = sender + " (XMPP)"
@@ -237,6 +247,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
                     id=str(jid),
                     avatar_callback=None,
                 ),
+                extra_id=stanza_id,
                 url_callback=url_callback,
                 fname=fname,
                 mime=None,
@@ -263,7 +274,7 @@ class XmppListener(XmppReconnectableActor, ChatHandlerFactory):
                 ),
                 text=text if reply and text else body,
                 reply=Reply(
-                    id=None,
+                    id=message["reply"]["id"] if message['reply'] else None,
                     body=reply,
                 ) if reply else None,
                 edit=is_edit

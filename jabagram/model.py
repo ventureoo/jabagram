@@ -66,6 +66,7 @@ class Message(Event):
     sender: Sender
     reply: Reply | None = field(repr=False, default=None)
     edit: bool | None = False
+    extra_id: str | None = None
 
 @dataclass(kw_only=True)
 class Attachment(Message):

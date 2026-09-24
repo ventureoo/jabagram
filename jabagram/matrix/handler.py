@@ -175,7 +175,11 @@ class MatrixChatHandler(ChatHandler):
             source_message_id=origin.id,
             target_message_id=response.event_id,
             body=origin.text,
-            topic_id=origin.chat.topic_id
+            topic_id=origin.chat.topic_id,
+            extra_id=origin.extra_id,
+            mfrom=f"{origin.chat.address}/{origin.sender.name}" if
+                origin.chat.realm == Realm.XMPP else None,
+            reply_id=origin.reply.id if origin.reply else None
         )
 
     @override
@@ -297,7 +301,11 @@ class MatrixChatHandler(ChatHandler):
             source_message_id=attachment.id,
             target_message_id=response.event_id,
             body=attachment.text,
-            topic_id=attachment.chat.topic_id
+            topic_id=attachment.chat.topic_id,
+            extra_id=attachment.extra_id,
+            mfrom=f"{attachment.chat.address}/{attachment.sender.name}" if
+                attachment.chat.realm == Realm.XMPP else None,
+            reply_id=attachment.reply.id if attachment.reply else None
         )
 
         response = await self.__client.room_send(
@@ -319,7 +327,11 @@ class MatrixChatHandler(ChatHandler):
             source_message_id=attachment.id,
             target_message_id=response.event_id,
             body=attachment.text,
-            topic_id=attachment.chat.topic_id
+            topic_id=attachment.chat.topic_id,
+            extra_id=attachment.extra_id,
+            mfrom=f"{attachment.chat.address}/{attachment.sender.name}" if
+                attachment.chat.realm == Realm.XMPP else None,
+            reply_id=attachment.reply.id if attachment.reply else None
         )
 
 

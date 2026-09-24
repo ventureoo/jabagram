@@ -92,19 +92,19 @@ class TelegramChatHandler(ChatHandler):
 
         if origin.reply:
             result = None
-            if origin.reply.body:
-                result = self.__message_storage.get_by_body(
-                    target=self.__chat.address,
-                    target_realm=self.__chat.realm,
-                    topic_id=None,
-                    body=origin.reply.body,
-                )
-            elif origin.reply.id:
+            if origin.reply.id:
                 result = self.__message_storage.get_by_id(
                     target=origin.chat.address,
                     source=self.__chat.address,
                     topic_id=None,
                     message_id=origin.reply.id,
+                )
+            elif origin.reply.body:
+                result = self.__message_storage.get_by_body(
+                    target=self.__chat.address,
+                    target_realm=self.__chat.realm,
+                    topic_id=None,
+                    body=origin.reply.body,
                 )
 
             if result:
@@ -153,7 +153,11 @@ class TelegramChatHandler(ChatHandler):
                 source_message_id=origin.id,
                 target_message_id=response['message_id'],
                 body=origin.text,
-                topic_id=response.get("message_thread_id")
+                topic_id=response.get("message_thread_id"),
+                extra_id=origin.extra_id,
+                mfrom=f"{origin.chat.address}/{origin.sender.name}" if
+                    origin.chat.realm == Realm.XMPP else None,
+                reply_id=origin.reply.id if origin.reply else None
             )
 
             if entry:
@@ -231,7 +235,11 @@ class TelegramChatHandler(ChatHandler):
                             source_message_id=attachment.id,
                             target_message_id=response['message_id'],
                             body=f"{attachment.text}\n{url}" if attachment.text else url,
-                            topic_id=response.get("message_thread_id")
+                            topic_id=response.get("message_thread_id"),
+                            extra_id=attachment.extra_id,
+                            mfrom=f"{attachment.chat.address}/{attachment.sender.name}" if
+                                attachment.chat.realm == Realm.XMPP else None,
+                            reply_id=attachment.reply.id if attachment.reply else None
                         )
                         if entry:
                             self.__residence_map[attachment.sender.name] = entry

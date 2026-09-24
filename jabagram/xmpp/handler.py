@@ -31,6 +31,7 @@ from jabagram.model import (
     Sticker,
 )
 from jabagram.xmpp.actor import XmppActorFactory
+from jabagram.xmpp.stanza import StanzaManager
 
 from aiohttp import ClientConnectionError
 from pathlib import Path
@@ -38,11 +39,13 @@ from slixmpp.exceptions import IqTimeout, IqError
 from slixmpp.jid import JID
 from slixmpp.plugins.xep_0363.http_upload import HTTPError
 
+
 class XmppRoomHandler(ChatHandler):
     def __init__(
         self,
         chat: Chat,
         actor_factory: XmppActorFactory,
+        stanza_manager: StanzaManager,
         message_storage: MessageStorage,
         sticker_cache: StickerCache,
     ) -> None:
@@ -50,18 +53,27 @@ class XmppRoomHandler(ChatHandler):
         self.__chat = chat
         self.__actor_factory = actor_factory
         self.__muc = JID(chat.address)
+        self.__stanza_manager = stanza_manager
         self.__message_storage = message_storage
         self.__sticker_cache = sticker_cache
         self.__logger = logging.getLogger(f"XmppRoomHandler {chat.address}")
 
-    async def send_message(self, origin: Message) -> None:
-        self.__logger.info("Sending message with id: %s", origin.id)
-
+    async def __make_message(self, origin: Message):
         mbody = origin.text
 
-        if origin.reply and origin.reply.body:
-            reply_body = "> " + origin.reply.body.replace("\n", "\n> ")
-            mbody = f"{reply_body}\n{origin.text}"
+        result = None
+        reply_body = None
+        if origin.reply:
+            if origin.reply.id:
+                result = self.__message_storage.get_by_id(
+                    target=origin.chat.address,
+                    source=self.__chat.address,
+                    topic_id=origin.chat.topic_id,
+                    message_id=origin.reply.id,
+                )
+            elif origin.reply.body:
+                reply_body = "> " + origin.reply.body.replace("\n", "\n> ")
+                mbody = f"{reply_body}\n{origin.text}"
 
         actor = await self.__actor_factory.get_actor(
             user=Sender(
@@ -76,15 +88,35 @@ class XmppRoomHandler(ChatHandler):
             mtype="groupchat",
             mbody=mbody
         )
+
+        if result:
+            message["reply"]["id"] = result.extra_id
+            message["reply"]["to"] = result.mfrom
+            if reply_body:
+                message["fallback"]["for"] = "NS"
+                message["fallback"]["body"]["start"] = 0
+                message["fallback"]["body"]["end"] = len(reply_body) + 1
+
+        return message
+
+
+    async def send_message(self, origin: Message) -> None:
+        self.__logger.info("Sending message with id: %s", origin.id)
+
+        message = await self.__make_message(origin)
         message.send()
 
+        stanza_id = await self.__stanza_manager.wait(message['id'])
         self.__message_storage.add(
             source=origin.chat,
             target=self.__chat,
             target_message_id=message['id'],
             source_message_id=origin.id,
             body=origin.text,
-            topic_id=origin.chat.topic_id
+            topic_id=origin.chat.topic_id,
+            extra_id=stanza_id,
+            mfrom=message['stanza_id']['by'],
+            reply_id=message['reply']['id'] if message['reply'] else None
         )
 
     async def send_attachment(self, attachment: Attachment) -> None:
@@ -188,7 +220,10 @@ class XmppRoomHandler(ChatHandler):
                 target_message_id=message['id'],
                 source_message_id=attachment.id,
                 body=body,
-                topic_id=attachment.chat.topic_id
+                topic_id=attachment.chat.topic_id,
+                extra_id=message['stanza_id']['id'],
+                mfrom=message['stanza_id']['by'],
+                reply_id=message['reply']['id'] if message['reply'] else None
             )
 
     async def edit_message(self, edited: Message) -> None:
@@ -206,25 +241,9 @@ class XmppRoomHandler(ChatHandler):
             )
             return
 
-        mbody = edited.text
-        actor = await self.__actor_factory.get_actor(
-            user=Sender(
-                id=edited.sender.id,
-                name=edited.sender.name,
-                avatar_callback=edited.sender.avatar_callback,
-            ),
-            muc=str(self.__muc)
-        )
-
-        if edited.reply and edited.reply.body:
-            reply_body = "> " + edited.reply.body.replace("\n", "\n> ")
-            mbody = f"{reply_body}\n{mbody}"
-
-        message = actor.make_message(
-            mto=self.__muc,
-            mtype="groupchat",
-            mbody=mbody
-        )
+        message = await self.__make_message(edited)
+        if message['reply']:
+            message["reply"]["id"] = result.reply_id
         message['replace']['id'] = result.target_id
         message.send()
 

@@ -28,6 +28,9 @@ class MessageIdEntry(NamedTuple):
     topic_id: int | None
     source_realm: int
     target_realm: int
+    mfrom: str | None
+    extra_id: str | None
+    reply_id: str | None
 
 class MessageStorage(SqliteTable):
     def __init__(self, path: str):
@@ -41,7 +44,8 @@ class MessageStorage(SqliteTable):
                 "(source_message_id TEXT NOT NULL, target_message_id TEXT NOT NULL,"
                 "body TEXT, source TEXT NOT NULL, topic_id INTEGER,"
                 "target TEXT NOT NULL, source_realm INTEGER NOT NULL,"
-                "target_realm INTEGER NOT NULL)"
+                "target_realm INTEGER NOT NULL, mfrom TEXT, extra_id TEXT,"
+                "reply_id TEXT)"
             )
         ) is None:
             return False
@@ -55,6 +59,9 @@ class MessageStorage(SqliteTable):
         target_message_id: str,
         topic_id: int | None,
         body: str,
+        mfrom: str | None,
+        extra_id: str | None,
+        reply_id: str | None,
     ) -> None:
         digest = hashlib.sha256(body.encode()).hexdigest()
         self._execute(
@@ -66,10 +73,13 @@ class MessageStorage(SqliteTable):
             target.address,
             source.realm.value,
             target.realm.value,
+            mfrom,
+            extra_id,
+            reply_id,
             statement=(
                 "INSERT INTO messages(source_message_id, target_message_id,"
-                "body, source, topic_id, target, source_realm, target_realm)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                "body, source, topic_id, target, source_realm, target_realm,"
+                "mfrom, extra_id, reply_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             ),
             on_error_message="Failed to insert message in table"
         )
@@ -79,11 +89,13 @@ class MessageStorage(SqliteTable):
         source: str,
         topic_id: int | None,
         target: str,
-        message_id: str
+        message_id: str,
     ) -> MessageIdEntry | None:
         statement = (
-            "SELECT source_message_id, target_message_id, topic_id, source_realm, target_realm FROM messages WHERE"
-            " (source = ? OR source = ?) AND (target = ? OR target = ?) AND (source_message_id = ? OR target_message_id = ?)"
+            "SELECT source_message_id, target_message_id, topic_id, "
+            "source_realm, target_realm, mfrom, extra_id, reply_id FROM messages WHERE"
+            " (source = ? OR source = ?) AND (target = ? OR target = ?) AND"
+            " (source_message_id = ? OR target_message_id = ? OR extra_id = ?)"
         )
 
         args = (
@@ -91,6 +103,7 @@ class MessageStorage(SqliteTable):
             target,
             source,
             target,
+            message_id,
             message_id,
             message_id,
         )
@@ -122,7 +135,8 @@ class MessageStorage(SqliteTable):
         body: str
     ) -> MessageIdEntry | None:
         statement = (
-            "SELECT source_message_id, target_message_id, topic_id, source_realm, target_realm FROM messages WHERE"
+            "SELECT source_message_id, target_message_id, topic_id, source_realm, "
+            "target_realm, mfrom, extra_id, reply_id FROM messages WHERE"
             " (source = ? OR target = ?) AND (target_realm = ? OR source_realm = ?) AND body = ?"
         )
         digest = hashlib.sha256(body.encode()).hexdigest()
