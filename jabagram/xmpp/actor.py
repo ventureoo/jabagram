@@ -516,6 +516,7 @@ class XmppActorFactory():
 
             if not (await actor.join(muc)):
                 await actor.destroy()
+                del self.__locks[user.id]
                 return self.__listener
 
             self.__actors_pool[user.id] = actor
