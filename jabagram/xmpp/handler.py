@@ -196,16 +196,16 @@ class XmppRoomHandler(ChatHandler):
                 self.__logger.error("Cannot upload file: %s", error)
                 return
 
-        body = url
+        body = None
         if attachment.text:
-            body = f"{attachment.text}\n{body}"
+            body = f"{attachment.text}"
 
         if attachment.reply and attachment.reply.body:
             reply = "> " + attachment.reply.body.replace("\n", "\n> ")
-            body = f"{reply}\n{body}"
+            body = f"{reply}\n{body}" if body else reply
 
         message = actor.make_message(
-            mbody=body,
+            mbody=f"{body}\n{url}" if body else url,
             mto=self.__muc,
             mtype='groupchat',
         )
